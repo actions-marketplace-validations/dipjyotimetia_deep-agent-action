@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { detectMode } from "../src/modes/detector.js";
+import { detectMode, isReviewRequest } from "../src/modes/detector.js";
 import { makeContext } from "./mockContext.js";
 
 const phrase = "@agent";
@@ -42,5 +42,16 @@ describe("detectMode", () => {
   test("unrelated events are a no-op", () => {
     const ctx = makeContext({ eventName: "push", triggerText: "@agent" });
     expect(detectMode(ctx, { triggerPhrase: phrase })).toBe("noop");
+  });
+});
+
+describe("isReviewRequest", () => {
+  test("matches instructions that start with review", () => {
+    expect(isReviewRequest("review this PR")).toBe(true);
+    expect(isReviewRequest("  Review the changes")).toBe(true);
+  });
+  test("does not match other instructions", () => {
+    expect(isReviewRequest("fix the bug")).toBe(false);
+    expect(isReviewRequest("add a review feature")).toBe(false);
   });
 });

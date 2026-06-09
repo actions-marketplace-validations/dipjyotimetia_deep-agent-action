@@ -1,3 +1,5 @@
+import type { TokenUsage } from "../types.js";
+
 export interface TodoItem {
   content: string;
   status: string;
@@ -6,6 +8,7 @@ export interface TodoItem {
 export interface StreamResult {
   todos: TodoItem[];
   summary: string;
+  tokens: TokenUsage;
 }
 
 /** Coerce LangChain message content (string | array of parts) to plain text. */
@@ -99,7 +102,21 @@ export async function runAgentStream(
     await options.onProgress(todos);
   }
 
-  return { todos, summary: lastAiText(finalMessages) };
+  return { todos, summary: lastAiText(finalMessages), tokens: sumTokens(finalMessages) };
+}
+
+/** Sum input/output tokens across all AI messages in the final state. */
+function sumTokens(messages: unknown[]): TokenUsage {
+  let input = 0;
+  let output = 0;
+  for (const msg of messages) {
+    const usage = (msg as any)?.usage_metadata;
+    if (usage) {
+      input += Number(usage.input_tokens ?? 0);
+      output += Number(usage.output_tokens ?? 0);
+    }
+  }
+  return { input, output };
 }
 
 /** The text of the last AI message in the final state (the agent's closing summary). */

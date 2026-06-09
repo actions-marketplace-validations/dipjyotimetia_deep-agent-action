@@ -1,5 +1,6 @@
 import { createDeepAgent, LocalShellBackend } from "deepagents";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import type { DynamicStructuredTool } from "@langchain/core/tools";
 import type { ToolCallRecord } from "../types.js";
 import { createShellGuard } from "./shellGuard.js";
 import { buildShellEnv } from "./env.js";
@@ -13,6 +14,8 @@ export interface BuildAgentOptions {
   shellTimeoutSeconds: number;
   /** Mutable sink the shell guard appends tool-call records to. */
   toolCallRecord: ToolCallRecord[];
+  /** Extra tools (e.g. from MCP servers) added alongside the built-in tools. */
+  extraTools?: DynamicStructuredTool[];
 }
 
 /**
@@ -39,5 +42,6 @@ export function buildAgent(opts: BuildAgentOptions) {
     backend,
     systemPrompt: opts.systemPrompt,
     middleware: [shellGuard],
+    tools: opts.extraTools ?? [],
   });
 }

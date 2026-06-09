@@ -38,4 +38,27 @@ describe("renderTrackingBody", () => {
     expect(body).toContain("⛔");
     expect(body).toContain("not authorized");
   });
+
+  test("embeds the sticky-comment marker", () => {
+    expect(renderTrackingBody({ status: "working" })).toContain("<!-- deep-agent:tracking -->");
+  });
+
+  test("renders an approval-pending draft PR differently", () => {
+    const body = renderTrackingBody({
+      status: "success",
+      prUrl: "https://github.com/acme/widgets/pull/3",
+      approvalPending: true,
+    });
+    expect(body).toContain("awaiting approval");
+  });
+
+  test("renders token usage and cost", () => {
+    const body = renderTrackingBody({
+      status: "success",
+      tokens: { input: 100, output: 50 },
+      costUsd: 0.0012,
+    });
+    expect(body).toContain("100 in / 50 out");
+    expect(body).toContain("$0.0012");
+  });
 });

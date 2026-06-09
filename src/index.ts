@@ -1,9 +1,12 @@
 import * as core from "@actions/core";
 import { context } from "@actions/github";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
-import { loadConfig, normalizeModel, resolveProviderApiKey } from "./config.js";
+import { loadConfig, mergeRepoConfig, normalizeModel, resolveProviderApiKey } from "./config.js";
+import { loadRepoConfig, type RepoConfig } from "./config/repoConfig.js";
 import { parseContext } from "./github/context.js";
-import { detectMode } from "./modes/detector.js";
+import { detectMode, isReviewRequest } from "./modes/detector.js";
 import { resolveToken } from "./github/auth.js";
 import { makeOctokit, githubServerUrl, type Octokit } from "./github/client.js";
 import { forkRunAllowed } from "./github/fork.js";
@@ -13,19 +16,33 @@ import { extractInstruction } from "./github/validation/trigger.js";
 import {
   addEyesReaction,
   createTrackingComment,
+  findTrackingComment,
   updateTrackingComment,
   renderTrackingBody,
 } from "./github/comments.js";
 import { createModel } from "./agent/model.js";
 import { buildAgent } from "./agent/createAgent.js";
-import { buildSystemPrompt, buildUserMessage } from "./agent/prompt.js";
-import { runAgentStream } from "./agent/stream.js";
+import {
+  buildSystemPrompt,
+  buildUserMessage,
+  buildReviewSystemPrompt,
+  buildReviewUserMessage,
+} from "./agent/prompt.js";
+import { runAgentStream, type TodoItem } from "./agent/stream.js";
+import { loadMcpTools } from "./agent/mcp.js";
+import { estimateCostUsd } from "./agent/cost.js";
 import { checkoutPrHead, landChanges, resolveBotIdentity } from "./github/ops.js";
+import { fetchPrFiles, parseFindings, postReview, REVIEW_FINDINGS_FILE } from "./github/review.js";
 import { emitOutputs } from "./outputs.js";
-import type { GitHubContext, RunRecord } from "./types.js";
+import type { Config, GitHubContext, Mode, RunRecord, TokenUsage } from "./types.js";
 
 function runUrl(ctx: GitHubContext): string {
   return `${githubServerUrl()}/${ctx.owner}/${ctx.repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}`;
+}
+
+/** Append an optional repo-supplied system prompt to the base one. */
+function systemPromptFor(base: string, repo: RepoConfig): string {
+  return repo.systemPrompt ? `${base}\n\n${repo.systemPrompt}` : base;
 }
 
 /** When the event is a PR comment, the payload lacks head/base repo info; fetch it. */
@@ -45,11 +62,26 @@ async function resolvePrRefs(octokit: Octokit, ctx: GitHubContext): Promise<void
   }
 }
 
+/** Reuse the existing sticky tracking comment if present, else create one. */
+async function getOrCreateComment(
+  octokit: Octokit,
+  ctx: GitHubContext,
+  body: string,
+): Promise<number | undefined> {
+  const existing = await findTrackingComment(octokit, ctx);
+  if (existing != null) {
+    await updateTrackingComment(octokit, ctx, existing, body);
+    return existing;
+  }
+  return createTrackingComment(octokit, ctx, body);
+}
+
 /**
  * Construct the model + agent from the (bundled) code paths without any network
  * calls. CI runs `DEEP_AGENT_SMOKE=1 node dist/index.js` to prove the bundle can
  * actually load the provider packages — a failure here is the dynamic-import
- * bundling bug that source-run tests cannot catch.
+ * bundling bug that source-run tests cannot catch. (Importing model.ts also
+ * forces every provider package to be bundled.)
  */
 async function smokeCheck(): Promise<void> {
   const anthropic = createModel({
@@ -58,6 +90,12 @@ async function smokeCheck(): Promise<void> {
     apiKey: "smoke",
   });
   const openai = createModel({ provider: "openai", model: "gpt-5", apiKey: "smoke" });
+  const google = createModel({ provider: "google", model: "gemini-2.5-pro", apiKey: "smoke" });
+  const openrouter = createModel({
+    provider: "openrouter",
+    model: "openai/gpt-4o",
+    apiKey: "smoke",
+  });
   const agent = buildAgent({
     model: anthropic,
     rootDir: process.cwd(),
@@ -68,7 +106,7 @@ async function smokeCheck(): Promise<void> {
     toolCallRecord: [],
   });
   core.info(
-    `smoke ok: anthropic=${anthropic.constructor.name} openai=${openai.constructor.name} stream=${typeof agent.stream}`,
+    `smoke ok: ${[anthropic, openai, google, openrouter].map((m) => m.constructor.name).join(",")} stream=${typeof agent.stream}`,
   );
 }
 
@@ -78,13 +116,17 @@ async function run(): Promise<void> {
     return;
   }
 
-  const config = loadConfig();
   const ctx = parseContext({
     eventName: context.eventName,
     actor: context.actor,
     repo: context.repo,
     payload: context.payload as Record<string, any>,
   });
+  const rootDir = process.env.GITHUB_WORKSPACE || process.cwd();
+
+  // Merge per-repo config (committed `.github/deep-agent.yml`) over action inputs.
+  const repoConfig = loadRepoConfig(rootDir);
+  const config = mergeRepoConfig(loadConfig(), repoConfig);
 
   const record: RunRecord = {
     status: "skipped",
@@ -96,9 +138,7 @@ async function run(): Promise<void> {
   };
 
   // P0-1: route the event.
-  const mode = detectMode(ctx, { triggerPhrase: config.triggerPhrase, prompt: config.prompt });
-  record.mode = mode;
-  if (mode === "noop") {
+  if (detectMode(ctx, { triggerPhrase: config.triggerPhrase, prompt: config.prompt }) === "noop") {
     core.info("No trigger phrase / prompt for this event; exiting with no side effects.");
     await emitOutputs(record);
     return;
@@ -113,6 +153,10 @@ async function run(): Promise<void> {
     await emitOutputs(record);
     return;
   }
+
+  // Refine to review mode when a PR mention asks for a review.
+  const mode: Mode = ctx.isPR && isReviewRequest(instruction) ? "review" : "agent";
+  record.mode = mode;
 
   // P0-12: mint a scoped, short-lived token.
   const tokenResult = await resolveToken({
@@ -133,8 +177,7 @@ async function run(): Promise<void> {
     return;
   }
 
-  // P0-3: authorization — the two checks are independent, so run them together.
-  // Ignore bots silently (no loops); refuse under-privileged actors with a comment.
+  // P0-3: authorization — independent checks run together. Ignore bots silently.
   const [human, perm] = await Promise.all([
     checkActorIsHuman(octokit, ctx.actor),
     checkActorPermission(octokit, {
@@ -156,94 +199,55 @@ async function run(): Promise<void> {
   }
 
   const url = runUrl(ctx);
-  const rootDir = process.env.GITHUB_WORKSPACE || process.cwd();
 
-  // P0-5: acknowledge + create the tracking comment (independent calls).
-  const [, commentId] = await Promise.all([
+  // P0-5 + M2: acknowledge, create/reuse the tracking comment, and load any MCP
+  // tools — all independent, so run them together.
+  const [, commentId, mcp] = await Promise.all([
     addEyesReaction(octokit, ctx),
-    createTrackingComment(
+    getOrCreateComment(
       octokit,
       ctx,
       renderTrackingBody({ status: "working", instruction, runUrl: url }),
     ),
+    loadMcpTools(config.mcpConfig),
   ]);
 
-  const isPRMode = ctx.isPR;
-
   try {
-    // PR mode: switch to the PR head so the agent edits the right branch.
-    if (isPRMode && ctx.prHeadRef) {
-      checkoutPrHead(rootDir, tokenResult.token, ctx.owner, ctx.repo, ctx.prHeadRef);
-    }
-
-    // P0-6/P0-8/P0-13: build the in-runner agent.
     const apiKey = resolveProviderApiKey();
     const { provider, name } = normalizeModel(config.model);
-    const model = createModel({ provider, model: name, apiKey });
-    const agent = buildAgent({
-      model,
-      rootDir,
-      systemPrompt: buildSystemPrompt(ctx, { isPRMode }),
-      allowedCommands: config.allowedCommands,
-      deniedCommands: config.deniedCommands,
-      shellTimeoutSeconds: config.shellTimeoutSeconds,
-      toolCallRecord: record.toolCalls,
-    });
+    const model = createModel({ provider, model: name, apiKey, baseUrl: config.baseUrl });
 
-    // P0-9: stream and mirror progress.
-    const result = await runAgentStream(
-      agent,
-      { messages: [{ role: "user", content: buildUserMessage(instruction, ctx) }] },
-      {
-        threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "dispatch"}`,
-        debounceMs: config.commentDebounceMs,
-        onProgress: async (todos) => {
-          if (commentId != null) {
-            await updateTrackingComment(
-              octokit,
-              ctx,
-              commentId,
-              renderTrackingBody({ status: "working", instruction, todos, runUrl: url }),
-            );
-          }
-        },
-      },
-    );
-    record.plan = result.todos;
-    record.summary = result.summary;
-
-    // P0-7: commit + open PR (or push to the existing PR branch).
-    const identity = await resolveBotIdentity(octokit, tokenResult.appSlug);
-    const land = await landChanges({
-      octokit,
-      ctx,
-      rootDir,
-      token: tokenResult.token,
-      isPRMode,
-      instruction,
-      identity,
-      branchSuffix: process.env.GITHUB_RUN_ID || "run",
-    });
-    record.filesChanged = land.filesChanged;
-    record.branch = land.branch;
-    record.prUrl = land.prUrl;
-    record.status = "success";
-
-    if (commentId != null) {
-      await updateTrackingComment(
+    if (mode === "review") {
+      await runReview({
         octokit,
         ctx,
+        rootDir,
+        token: tokenResult.token,
+        model,
+        instruction,
+        repoConfig,
+        config,
+        record,
         commentId,
-        renderTrackingBody({
-          status: "success",
-          instruction,
-          todos: record.plan,
-          summary: record.summary,
-          prUrl: record.prUrl,
-          branch: record.branch,
-          runUrl: url,
-        }),
-      );
+        url,
+        mcpTools: mcp.tools,
+      });
+    } else {
+      await runImplement({
+        octokit,
+        ctx,
+        rootDir,
+        token: tokenResult.token,
+        appSlug: tokenResult.appSlug,
+        model,
+        instruction,
+        repoConfig,
+        config,
+        record,
+        commentId,
+        url,
+        mcpTools: mcp.tools,
+      });
     }
     await emitOutputs(record);
   } catch (err) {
@@ -261,6 +265,8 @@ async function run(): Promise<void> {
           instruction,
           todos: record.plan,
           summary: record.summary,
+          tokens: record.tokens,
+          costUsd: record.costUsd,
           error: message,
           runUrl: url,
         }),
@@ -268,7 +274,192 @@ async function run(): Promise<void> {
     }
     await emitOutputs(record);
     core.setFailed(`Deep Agent run failed: ${message}`);
+  } finally {
+    await mcp.close().catch(() => {});
   }
+}
+
+interface FlowParams {
+  octokit: Octokit;
+  ctx: GitHubContext;
+  rootDir: string;
+  token: string;
+  model: Parameters<typeof buildAgent>[0]["model"];
+  instruction: string;
+  repoConfig: RepoConfig;
+  config: Config;
+  record: RunRecord;
+  commentId: number | undefined;
+  url: string;
+  mcpTools: Parameters<typeof buildAgent>[0]["extraTools"];
+}
+
+/** The progress-mirror callback shared by both flows: reflect the plan into the tracking comment. */
+function mirrorProgress(p: FlowParams): (todos: TodoItem[]) => Promise<void> {
+  return async (todos) => {
+    if (p.commentId != null) {
+      await updateTrackingComment(
+        p.octokit,
+        p.ctx,
+        p.commentId,
+        renderTrackingBody({ status: "working", instruction: p.instruction, todos, runUrl: p.url }),
+      );
+    }
+  };
+}
+
+/** Agent (implement) flow: edit files, then branch/PR or push (with optional approval gate). */
+async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void> {
+  const { octokit, ctx, rootDir, model, instruction, repoConfig, config, record, commentId, url } =
+    p;
+  const isPRMode = ctx.isPR;
+
+  // PR mode: switch to the PR head so the agent edits the right branch.
+  if (isPRMode && ctx.prHeadRef) {
+    checkoutPrHead(rootDir, p.token, ctx.owner, ctx.repo, ctx.prHeadRef);
+  }
+
+  const agent = buildAgent({
+    model,
+    rootDir,
+    systemPrompt: systemPromptFor(buildSystemPrompt(ctx, { isPRMode }), repoConfig),
+    allowedCommands: config.allowedCommands,
+    deniedCommands: config.deniedCommands,
+    shellTimeoutSeconds: config.shellTimeoutSeconds,
+    toolCallRecord: record.toolCalls,
+    extraTools: p.mcpTools,
+  });
+
+  const result = await runAgentStream(
+    agent,
+    { messages: [{ role: "user", content: buildUserMessage(instruction, ctx) }] },
+    {
+      threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "dispatch"}`,
+      debounceMs: config.commentDebounceMs,
+      onProgress: mirrorProgress(p),
+    },
+  );
+  applyUsage(record, config.model, result.tokens);
+  record.plan = result.todos;
+  record.summary = result.summary;
+
+  // P0-7 + M4: commit + open PR / push, gated by approval when configured.
+  const identity = await resolveBotIdentity(octokit, p.appSlug);
+  const land = await landChanges({
+    octokit,
+    ctx,
+    rootDir,
+    token: p.token,
+    isPRMode,
+    instruction,
+    identity,
+    branchSuffix: process.env.GITHUB_RUN_ID || "run",
+    requireApproval: config.requirePushApproval,
+  });
+  record.filesChanged = land.filesChanged;
+  record.branch = land.branch;
+  record.prUrl = land.prUrl;
+  record.approvalPending = land.approvalPending;
+  record.status = "success";
+
+  if (commentId != null) {
+    await updateTrackingComment(
+      octokit,
+      ctx,
+      commentId,
+      renderTrackingBody({
+        status: "success",
+        instruction,
+        todos: record.plan,
+        summary: record.summary,
+        prUrl: record.prUrl,
+        branch: record.branch,
+        approvalPending: record.approvalPending,
+        tokens: record.tokens,
+        costUsd: record.costUsd,
+        runUrl: url,
+      }),
+    );
+  }
+}
+
+/** Review flow (M3): review the PR diff and post inline comments; no edits. */
+async function runReview(p: FlowParams): Promise<void> {
+  const { octokit, ctx, rootDir, model, instruction, repoConfig, config, record, commentId, url } =
+    p;
+
+  // Check out the PR head so the agent reads the proposed code (not the base
+  // branch actions/checkout left), keeping its line numbers aligned to the diff.
+  if (ctx.prHeadRef) {
+    checkoutPrHead(rootDir, p.token, ctx.owner, ctx.repo, ctx.prHeadRef);
+  }
+
+  const files = await fetchPrFiles(octokit, ctx);
+  const agent = buildAgent({
+    model,
+    rootDir,
+    systemPrompt: systemPromptFor(buildReviewSystemPrompt(ctx), repoConfig),
+    allowedCommands: config.allowedCommands,
+    deniedCommands: config.deniedCommands,
+    shellTimeoutSeconds: config.shellTimeoutSeconds,
+    toolCallRecord: record.toolCalls,
+    extraTools: p.mcpTools,
+  });
+
+  const result = await runAgentStream(
+    agent,
+    { messages: [{ role: "user", content: buildReviewUserMessage(instruction, files) }] },
+    {
+      threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "review"}`,
+      debounceMs: config.commentDebounceMs,
+      onProgress: mirrorProgress(p),
+    },
+  );
+  applyUsage(record, config.model, result.tokens);
+  record.plan = result.todos;
+
+  // Read the findings the agent wrote (file-handoff), then post the review.
+  const review = readFindings(rootDir, result.summary);
+  await postReview(octokit, ctx, review);
+  record.summary = `Reviewed ${files.length} file(s); posted ${review.findings.length} inline comment(s).`;
+  record.status = "success";
+
+  if (commentId != null) {
+    await updateTrackingComment(
+      octokit,
+      ctx,
+      commentId,
+      renderTrackingBody({
+        status: "success",
+        instruction,
+        summary: `${record.summary}\n\n${review.summary}`,
+        tokens: record.tokens,
+        costUsd: record.costUsd,
+        runUrl: url,
+      }),
+    );
+  }
+}
+
+/** Read the agent-written review findings file; fall back to a summary-only review. */
+function readFindings(rootDir: string, fallbackSummary: string) {
+  const path = join(rootDir, REVIEW_FINDINGS_FILE);
+  if (existsSync(path)) {
+    try {
+      const parsed = parseFindings(JSON.parse(readFileSync(path, "utf8")));
+      if (!parsed.summary) parsed.summary = fallbackSummary;
+      return parsed;
+    } catch {
+      // Fall through to summary-only.
+    }
+  }
+  return { summary: fallbackSummary, findings: [] };
+}
+
+/** Record token usage + estimated cost on the run record. */
+function applyUsage(record: RunRecord, model: string, tokens: TokenUsage): void {
+  record.tokens = tokens;
+  record.costUsd = estimateCostUsd(model, tokens);
 }
 
 /** Post a refusal comment (when possible), set status, emit outputs, and exit cleanly. */
@@ -282,7 +473,7 @@ async function refuse(
   record.error = reason;
   core.warning(reason);
   if (ctx.entityNumber != null) {
-    await createTrackingComment(
+    await getOrCreateComment(
       octokit,
       ctx,
       renderTrackingBody({ status: "refused", error: reason }),

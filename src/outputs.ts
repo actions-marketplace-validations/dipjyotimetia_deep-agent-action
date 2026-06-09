@@ -31,6 +31,13 @@ async function writeSummary(record: RunRecord): Promise<void> {
       s.addRaw(`**Files changed:** ${record.filesChanged.length}\n`, true);
     }
     if (record.prUrl) s.addRaw(`**Pull request:** ${record.prUrl}\n`, true);
+    if (record.tokens && (record.tokens.input || record.tokens.output)) {
+      const cost = record.costUsd != null ? ` (~$${record.costUsd.toFixed(4)})` : "";
+      s.addRaw(
+        `**Tokens:** ${record.tokens.input} in / ${record.tokens.output} out${cost}\n`,
+        true,
+      );
+    }
     if (record.error) s.addRaw(`**Error:** ${record.error}\n`, true);
     await s.write();
   } catch {
