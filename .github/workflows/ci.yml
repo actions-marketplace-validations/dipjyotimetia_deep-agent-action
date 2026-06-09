@@ -13,7 +13,8 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pinned so the committed dist bundle is reproducible against CI's rebuild.
+          bun-version: 1.3.14
 
       - name: Install
         run: bun install --frozen-lockfile

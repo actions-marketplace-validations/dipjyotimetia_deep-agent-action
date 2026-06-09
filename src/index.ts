@@ -28,13 +28,13 @@ import {
   buildReviewSystemPrompt,
   buildReviewUserMessage,
 } from "./agent/prompt.js";
-import { runAgentStream } from "./agent/stream.js";
+import { runAgentStream, type TodoItem } from "./agent/stream.js";
 import { loadMcpTools } from "./agent/mcp.js";
 import { estimateCostUsd } from "./agent/cost.js";
 import { checkoutPrHead, landChanges, resolveBotIdentity } from "./github/ops.js";
 import { fetchPrFiles, parseFindings, postReview, REVIEW_FINDINGS_FILE } from "./github/review.js";
 import { emitOutputs } from "./outputs.js";
-import type { Config, GitHubContext, Mode, RunRecord } from "./types.js";
+import type { Config, GitHubContext, Mode, RunRecord, TokenUsage } from "./types.js";
 
 function runUrl(ctx: GitHubContext): string {
   return `${githubServerUrl()}/${ctx.owner}/${ctx.repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}`;
@@ -200,18 +200,17 @@ async function run(): Promise<void> {
 
   const url = runUrl(ctx);
 
-  // P0-5: acknowledge + sticky tracking comment (independent calls).
-  const [, commentId] = await Promise.all([
+  // P0-5 + M2: acknowledge, create/reuse the tracking comment, and load any MCP
+  // tools — all independent, so run them together.
+  const [, commentId, mcp] = await Promise.all([
     addEyesReaction(octokit, ctx),
     getOrCreateComment(
       octokit,
       ctx,
       renderTrackingBody({ status: "working", instruction, runUrl: url }),
     ),
+    loadMcpTools(config.mcpConfig),
   ]);
-
-  // M2: optional MCP tools (best-effort).
-  const mcp = await loadMcpTools(config.mcpConfig);
 
   try {
     const apiKey = resolveProviderApiKey();
@@ -284,6 +283,7 @@ interface FlowParams {
   octokit: Octokit;
   ctx: GitHubContext;
   rootDir: string;
+  token: string;
   model: Parameters<typeof buildAgent>[0]["model"];
   instruction: string;
   repoConfig: RepoConfig;
@@ -294,8 +294,22 @@ interface FlowParams {
   mcpTools: Parameters<typeof buildAgent>[0]["extraTools"];
 }
 
+/** The progress-mirror callback shared by both flows: reflect the plan into the tracking comment. */
+function mirrorProgress(p: FlowParams): (todos: TodoItem[]) => Promise<void> {
+  return async (todos) => {
+    if (p.commentId != null) {
+      await updateTrackingComment(
+        p.octokit,
+        p.ctx,
+        p.commentId,
+        renderTrackingBody({ status: "working", instruction: p.instruction, todos, runUrl: p.url }),
+      );
+    }
+  };
+}
+
 /** Agent (implement) flow: edit files, then branch/PR or push (with optional approval gate). */
-async function runImplement(p: FlowParams & { token: string; appSlug?: string }): Promise<void> {
+async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void> {
   const { octokit, ctx, rootDir, model, instruction, repoConfig, config, record, commentId, url } =
     p;
   const isPRMode = ctx.isPR;
@@ -322,16 +336,7 @@ async function runImplement(p: FlowParams & { token: string; appSlug?: string })
     {
       threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "dispatch"}`,
       debounceMs: config.commentDebounceMs,
-      onProgress: async (todos) => {
-        if (commentId != null) {
-          await updateTrackingComment(
-            octokit,
-            ctx,
-            commentId,
-            renderTrackingBody({ status: "working", instruction, todos, runUrl: url }),
-          );
-        }
-      },
+      onProgress: mirrorProgress(p),
     },
   );
   applyUsage(record, config.model, result.tokens);
@@ -379,7 +384,7 @@ async function runImplement(p: FlowParams & { token: string; appSlug?: string })
 }
 
 /** Review flow (M3): review the PR diff and post inline comments; no edits. */
-async function runReview(p: FlowParams & { token: string }): Promise<void> {
+async function runReview(p: FlowParams): Promise<void> {
   const { octokit, ctx, rootDir, model, instruction, repoConfig, config, record, commentId, url } =
     p;
 
@@ -407,16 +412,7 @@ async function runReview(p: FlowParams & { token: string }): Promise<void> {
     {
       threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "review"}`,
       debounceMs: config.commentDebounceMs,
-      onProgress: async (todos) => {
-        if (commentId != null) {
-          await updateTrackingComment(
-            octokit,
-            ctx,
-            commentId,
-            renderTrackingBody({ status: "working", instruction, todos, runUrl: url }),
-          );
-        }
-      },
+      onProgress: mirrorProgress(p),
     },
   );
   applyUsage(record, config.model, result.tokens);
@@ -461,11 +457,7 @@ function readFindings(rootDir: string, fallbackSummary: string) {
 }
 
 /** Record token usage + estimated cost on the run record. */
-function applyUsage(
-  record: RunRecord,
-  model: string,
-  tokens: { input: number; output: number },
-): void {
+function applyUsage(record: RunRecord, model: string, tokens: TokenUsage): void {
   record.tokens = tokens;
   record.costUsd = estimateCostUsd(model, tokens);
 }

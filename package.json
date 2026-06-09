@@ -7,7 +7,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "build": "bun build ./src/index.ts --target=node --outfile=dist/index.js",
+    "build": "bun build ./src/index.ts --target=node --outfile=dist/index.js --minify-whitespace",
     "verify-dist": "bun run build && git diff --exit-code -- dist/",
     "smoke": "node dist/index.js",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
