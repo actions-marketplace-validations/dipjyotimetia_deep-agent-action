@@ -10,8 +10,13 @@ export type SupportedEventName =
   | "pull_request"
   | "workflow_dispatch";
 
-/** Execution mode resolved from the event. v1 supports "agent" or "noop". */
-export type Mode = "agent" | "noop";
+/**
+ * Execution mode resolved from the event:
+ *  - "agent": implement a change (edit files → branch/PR).
+ *  - "review": review a PR diff and post inline comments (no edits).
+ *  - "noop": nothing to do; exit cleanly.
+ */
+export type Mode = "agent" | "review" | "noop";
 
 /** Normalized, provider-agnostic view of the triggering GitHub event. */
 export interface GitHubContext {
@@ -48,16 +53,26 @@ export interface Config {
   prompt?: string;
   /** Provider-prefixed model id, e.g. "anthropic:claude-sonnet-4-5". */
   model: string;
+  /** Base URL for the `openai-compatible` provider (Groq, xAI, DeepSeek, Ollama, vLLM, …). */
+  baseUrl?: string;
   allowedPermissions: string[];
   allowedCommands: string[];
   deniedCommands: string[];
   /** Label that a write-access user can apply to authorize a fork-PR run. */
   forkAllowLabel?: string;
-  /** Reserved for P1-1 (not implemented in v1). */
+  /** When true, gate landing of changes behind human review (draft PR / proposed branch). */
   requirePushApproval: boolean;
+  /** Raw MCP server config JSON (optional); empty string when unset. */
+  mcpConfig: string;
   shellTimeoutSeconds: number;
   /** Minimum interval between tracking-comment edits, ms. */
   commentDebounceMs: number;
+}
+
+/** Token usage for a run. */
+export interface TokenUsage {
+  input: number;
+  output: number;
 }
 
 /** Outcome status surfaced as the `status` output. */
@@ -84,4 +99,8 @@ export interface RunRecord {
   branch?: string;
   summary?: string;
   error?: string;
+  tokens?: TokenUsage;
+  costUsd?: number;
+  /** True when changes were gated behind approval (draft PR / proposed branch). */
+  approvalPending?: boolean;
 }

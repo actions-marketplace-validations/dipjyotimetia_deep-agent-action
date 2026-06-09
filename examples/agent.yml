@@ -1,8 +1,13 @@
 # Example consumer workflow for Deep Agent Action.
 # Copy into .github/workflows/ in the target repository.
 #
-# The action identity comes from a GitHub App (recommended): PRs it opens will
-# trigger your other CI workflows, which a default GITHUB_TOKEN would not.
+# Usage:
+#   - On an issue:        "@agent implement X"   → opens a PR with the change.
+#   - On a pull request:  "@agent review"        → posts an inline code review.
+#   - On a pull request:  "@agent fix Y"         → pushes a commit to the PR branch.
+#
+# Per-repo tuning (optional): commit `.github/deep-agent.yml` with
+#   system_prompt / allowed_commands / denied_commands / model.
 name: Deep Agent
 
 on:
@@ -35,11 +40,17 @@ jobs:
         with:
           trigger_phrase: "@agent"
           prompt: ${{ github.event.inputs.prompt }}
+          # Any supported provider: anthropic | openai | azure | google | openrouter |
+          # openai-compatible (+ base_url) | bedrock | vertexai.
           model: "claude-sonnet-4-6"
           allowed_commands: "git,npm,pnpm,bun,pytest,go,make"
+          # require_push_approval: "true"        # gate changes behind review (draft PR / proposed branch)
           # fork_allow_label: "agent-approved"   # opt-in fork support, maintainer-gated
+          # base_url: "https://api.groq.com/openai/v1"        # for model: "openai-compatible:..."
+          # mcp_config: '{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}'
         env:
           # Required: your model provider key (this is the only secret you must add).
+          # Bedrock uses AWS_* env; Vertex AI uses GOOGLE_APPLICATION_CREDENTIALS; Azure uses AZURE_OPENAI_* env.
           PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
           # Optional: a GitHub App identity. Without it, the workflow's built-in
           # GITHUB_TOKEN is used automatically — but PRs it opens won't trigger

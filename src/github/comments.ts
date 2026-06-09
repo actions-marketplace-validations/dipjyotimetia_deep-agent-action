@@ -1,8 +1,10 @@
 import type { Octokit } from "./client.js";
-import type { GitHubContext, RunStatus } from "../types.js";
+import type { GitHubContext, RunStatus, TokenUsage } from "../types.js";
 import type { TodoItem } from "../agent/stream.js";
 
 const HEADER = "### 🤖 Deep Agent";
+/** Hidden marker used to find this run's sticky tracking comment on re-runs. */
+const MARKER = "<!-- deep-agent:tracking -->";
 
 function checkbox(status: string): string {
   if (status === "completed") return "- [x]";
@@ -19,11 +21,15 @@ export interface TrackingState {
   summary?: string;
   error?: string;
   runUrl?: string;
+  tokens?: TokenUsage;
+  costUsd?: number;
+  /** When true, changes are gated behind human review (draft PR / proposed branch). */
+  approvalPending?: boolean;
 }
 
 /** Render the single tracking-comment body from the current state. */
 export function renderTrackingBody(state: TrackingState): string {
-  const lines: string[] = [HEADER, ""];
+  const lines: string[] = [MARKER, HEADER, ""];
 
   switch (state.status) {
     case "working":
@@ -49,12 +55,51 @@ export function renderTrackingBody(state: TrackingState): string {
   }
 
   if (state.summary) lines.push("", state.summary);
-  if (state.prUrl) lines.push("", `**Pull request:** ${state.prUrl}`);
-  else if (state.branch) lines.push("", `**Branch:** \`${state.branch}\``);
+  if (state.approvalPending && state.prUrl) {
+    lines.push(
+      "",
+      `**Draft pull request (awaiting approval):** ${state.prUrl}`,
+      "Mark it ready / merge to apply the changes.",
+    );
+  } else if (state.approvalPending && state.branch) {
+    lines.push(
+      "",
+      `**Proposed branch (awaiting approval):** \`${state.branch}\``,
+      "Review and merge it into the PR branch to apply the changes.",
+    );
+  } else if (state.prUrl) {
+    lines.push("", `**Pull request:** ${state.prUrl}`);
+  } else if (state.branch) {
+    lines.push("", `**Branch:** \`${state.branch}\``);
+  }
+  if (state.tokens && (state.tokens.input || state.tokens.output)) {
+    const cost = state.costUsd != null ? ` (~$${state.costUsd.toFixed(4)})` : "";
+    lines.push("", `_Tokens: ${state.tokens.input} in / ${state.tokens.output} out${cost}_`);
+  }
   if (state.error) lines.push("", `> ${state.error}`);
   if (state.runUrl) lines.push("", `[View run](${state.runUrl})`);
 
   return lines.join("\n");
+}
+
+/** Find an existing sticky tracking comment on the issue/PR (by hidden marker). */
+export async function findTrackingComment(
+  octokit: Octokit,
+  ctx: GitHubContext,
+): Promise<number | undefined> {
+  if (ctx.entityNumber == null) return undefined;
+  try {
+    const comments = await octokit.paginate(octokit.rest.issues.listComments, {
+      owner: ctx.owner,
+      repo: ctx.repo,
+      issue_number: ctx.entityNumber,
+      per_page: 100,
+    });
+    const found = comments.find((c) => typeof c.body === "string" && c.body.includes(MARKER));
+    return found?.id;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Add an "eyes" reaction to the triggering comment/issue (best-effort). */

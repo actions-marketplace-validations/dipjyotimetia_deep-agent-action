@@ -1,4 +1,5 @@
 import type { GitHubContext } from "../types.js";
+import { REVIEW_FINDINGS_FILE } from "../github/review.js";
 
 /**
  * Build the system prompt that sets the agent's role and conventions. The
@@ -31,4 +32,42 @@ export function buildUserMessage(instruction: string, ctx: GitHubContext): strin
     ? `${ctx.isPR ? "pull request" : "issue"} #${ctx.entityNumber}`
     : "a manual dispatch";
   return `The following request was made on ${where}:\n\n${instruction}`;
+}
+
+/** System prompt for code-review mode: read-only, write findings to a file. */
+export function buildReviewSystemPrompt(ctx: GitHubContext): string {
+  const repo = `${ctx.owner}/${ctx.repo}`;
+  return [
+    `You are a code reviewer for the GitHub repository ${repo}, reviewing a pull request.`,
+    `The repository is checked out at the current working directory and you can read files and`,
+    `run read-only shell commands via \`execute\`. Do NOT edit, commit, or push anything.`,
+    ``,
+    `Review the changed files for correctness bugs, security issues, and clear quality problems.`,
+    `Focus on lines that the diff actually adds or changes — only comment on those.`,
+    ``,
+    `When finished, write your review as JSON to the file \`${REVIEW_FINDINGS_FILE}\` in the`,
+    `repository root using the \`write_file\` tool, with exactly this shape:`,
+    `{ "summary": "<overall summary>", "findings": [ { "path": "<file>", "line": <number>, "body": "<comment>" } ] }`,
+    `Use an empty findings array if the change looks good. Then end with a one-line summary.`,
+  ].join("\n");
+}
+
+/** User message for review mode: the list of changed files and their patches. */
+export function buildReviewUserMessage(
+  instruction: string,
+  files: { filename: string; patch?: string }[],
+): string {
+  const diff = files
+    .map(
+      (f) =>
+        `### ${f.filename}\n${f.patch ? "```diff\n" + f.patch + "\n```" : "(no patch available)"}`,
+    )
+    .join("\n\n");
+  return [
+    instruction ? `Review request: ${instruction}` : "Review this pull request.",
+    "",
+    "Changed files:",
+    "",
+    diff,
+  ].join("\n");
 }

@@ -11,13 +11,26 @@ describe("normalizeModel", () => {
     });
   });
 
-  test("infers openai for a bare gpt model", () => {
+  test("infers provider from a bare model-name prefix", () => {
     expect(normalizeModel("gpt-5").provider).toBe("openai");
+    expect(normalizeModel("o3-mini").provider).toBe("openai");
+    expect(normalizeModel("gemini-2.5-pro").provider).toBe("google");
+    expect(normalizeModel("mistral-large").provider).toBe("anthropic"); // unknown → default
   });
 
   test("respects an explicit provider prefix", () => {
-    const m = normalizeModel("openai:gpt-5");
-    expect(m).toEqual({ provider: "openai", name: "gpt-5", full: "openai:gpt-5" });
+    expect(normalizeModel("openai:gpt-5")).toEqual({
+      provider: "openai",
+      name: "gpt-5",
+      full: "openai:gpt-5",
+    });
+    expect(normalizeModel("openrouter:openai/gpt-4o").name).toBe("openai/gpt-4o");
+  });
+
+  test("splits only on the first colon (Bedrock model ids contain colons)", () => {
+    const m = normalizeModel("bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0");
+    expect(m.provider).toBe("bedrock");
+    expect(m.name).toBe("anthropic.claude-3-5-sonnet-20241022-v2:0");
   });
 
   test("lower-cases the provider", () => {

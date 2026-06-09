@@ -14,9 +14,19 @@ inputs:
     description: "Explicit instruction for workflow_dispatch runs (bypasses the trigger phrase)."
     required: false
   model:
-    description: "Model id. Provider-prefixed (e.g. 'anthropic:claude-sonnet-4-6', 'openai:gpt-5') or a bare name."
+    description: >-
+      Model id, optionally provider-prefixed. Providers: anthropic, openai, azure, google (Gemini),
+      openrouter, openai-compatible (+ base_url), bedrock (AWS), vertexai (GCP). Examples:
+      'claude-sonnet-4-6', 'openai:gpt-5', 'google:gemini-2.5-pro', 'openrouter:openai/gpt-4o',
+      'bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0', 'openai-compatible:llama-3.1-70b'.
     required: false
     default: "claude-sonnet-4-6"
+  base_url:
+    description: "Endpoint URL for the 'openai-compatible' provider (Groq, xAI, DeepSeek, Together, Ollama, vLLM, …)."
+    required: false
+  mcp_config:
+    description: "MCP servers JSON: { \"mcpServers\": { name: { command, args, env } | { url } } }. Tools are exposed to the agent."
+    required: false
   allowed_permissions:
     description: "Comma-separated repository permission levels allowed to trigger the agent."
     required: false
@@ -39,7 +49,10 @@ inputs:
     required: false
     default: "8000"
   provider_api_key:
-    description: "Model provider API key. May also be supplied via PROVIDER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY env."
+    description: >-
+      Model provider API key (anthropic/openai/google/openrouter/openai-compatible). May also be supplied via
+      PROVIDER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY / OPENROUTER_API_KEY env.
+      Bedrock uses the AWS env chain; Vertex AI and Azure use their own standard env vars.
     required: false
   app_id:
     description: "GitHub App id used to mint a scoped, short-lived installation token. May also be supplied via APP_ID env."
@@ -51,6 +64,10 @@ inputs:
     description: "Token for GitHub API/git operations. Defaults to the workflow's GITHUB_TOKEN, so no setup is needed. NOTE: PRs opened with GITHUB_TOKEN do not trigger downstream CI — configure a GitHub App (app_id + app_private_key) only if you need the agent's PRs to run your CI."
     required: false
     default: ${{ github.token }}
+  require_push_approval:
+    description: "Gate landing of changes behind human review: opens a draft PR (issue mode) or pushes a proposed branch with a compare link (PR mode)."
+    required: false
+    default: "false"
   # --- Reserved for future phases (declared so the input surface is intentional) ---
   execution_mode:
     description: "Reserved. Only 'in_runner' is implemented in v1; 'bridge' (hosted Open SWE) is planned (P1)."
@@ -62,10 +79,6 @@ inputs:
   assistant_id:
     description: "Reserved for bridge mode (P1)."
     required: false
-  require_push_approval:
-    description: "Reserved for human-in-the-loop push approval (P1-1). Not yet implemented."
-    required: false
-    default: "false"
 
 outputs:
   status:

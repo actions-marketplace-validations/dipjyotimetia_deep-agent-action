@@ -5,15 +5,18 @@ import { checkContainsTrigger } from "../github/validation/trigger.js";
 const MENTIONABLE_PR_ACTIONS = new Set(["opened", "reopened", "ready_for_review", "edited"]);
 const MENTIONABLE_ISSUE_ACTIONS = new Set(["opened", "reopened", "edited", "assigned", "labeled"]);
 
+/** True when the instruction asks for a code review (e.g. "review this PR"). */
+export function isReviewRequest(instruction: string): boolean {
+  return /^\s*review\b/i.test(instruction);
+}
+
 /**
- * Decide whether this event should run the agent or be a no-op.
+ * Decide whether this event should trigger the agent or be a no-op. The
+ * agent-vs-review distinction is refined by the caller from the resolved
+ * instruction (see isReviewRequest), since review only applies on PRs.
  *
- * v1 supports two modes:
- *  - "agent": a mention (or workflow_dispatch prompt) asks the agent to act.
- *  - "noop": nothing to do; exit cleanly with no side effects.
- *
- * Review behaviour on bare `pull_request` events is deferred to P1, so those
- * events without a mention resolve to "noop".
+ * Review behaviour on bare `pull_request` events (no mention) is deferred, so
+ * those resolve to "noop".
  */
 export function detectMode(
   ctx: GitHubContext,

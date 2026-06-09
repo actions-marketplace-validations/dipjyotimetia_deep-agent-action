@@ -52,6 +52,8 @@ export interface LandResult {
   filesChanged: string[];
   branch?: string;
   prUrl?: string;
+  /** True when the result is gated for review (draft PR / proposed branch). */
+  approvalPending?: boolean;
 }
 
 /**
@@ -88,6 +90,8 @@ export async function landChanges(params: {
   instruction: string;
   identity: { name: string; email: string };
   branchSuffix: string;
+  /** Gate landing behind human review (draft PR / proposed branch). */
+  requireApproval: boolean;
 }): Promise<LandResult> {
   const { octokit, ctx, rootDir, token, isPRMode, instruction, identity, branchSuffix } = params;
 
@@ -102,7 +106,19 @@ export async function landChanges(params: {
   runGit(["add", "-A"], rootDir);
   runGit(["commit", "-m", title], rootDir);
 
-  if (isPRMode && ctx.prHeadRef) {
+  if (isPRMode) {
+    if (!ctx.prHeadRef) {
+      throw new Error("PR mode requires a resolved head branch (prHeadRef); cannot push changes.");
+    }
+    if (params.requireApproval) {
+      // Don't touch the PR branch; push a proposed branch + compare link for review.
+      const proposed = sanitizeBranchName(
+        `deep-agent/proposed/${ctx.entityNumber}-${branchSuffix}`,
+      );
+      runGit(["push", url, `HEAD:refs/heads/${proposed}`], rootDir);
+      const compare = `${githubServerUrl()}/${ctx.owner}/${ctx.repo}/compare/${ctx.prHeadRef}...${proposed}?expand=1`;
+      return { filesChanged, branch: proposed, prUrl: compare, approvalPending: true };
+    }
     // Push to the existing PR branch (same-repo only).
     runGit(["push", url, `HEAD:refs/heads/${ctx.prHeadRef}`], rootDir);
     return { filesChanged, branch: ctx.prHeadRef };
@@ -131,9 +147,10 @@ export async function landChanges(params: {
     base: baseBranch,
     title,
     body,
+    draft: params.requireApproval,
   });
 
-  return { filesChanged, branch, prUrl: pr.data.html_url };
+  return { filesChanged, branch, prUrl: pr.data.html_url, approvalPending: params.requireApproval };
 }
 
 /** Resolve the bot commit identity from the App slug (or a generic fallback). */

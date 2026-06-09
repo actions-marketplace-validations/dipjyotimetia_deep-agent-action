@@ -1,5 +1,6 @@
 import * as core from "@actions/core";
 import type { Config } from "./types.js";
+import type { RepoConfig } from "./config/repoConfig.js";
 
 /** Default shell commands the agent is allowed to run. */
 export const DEFAULT_ALLOWED_COMMANDS = [
@@ -48,6 +49,13 @@ export const DEFAULT_DENIED_COMMANDS = [
  * `claude-sonnet-4-5` -> `{ provider: "anthropic", name: "claude-sonnet-4-5", full: "anthropic:claude-sonnet-4-5" }`
  * `openai:gpt-5` -> `{ provider: "openai", name: "gpt-5", full: "openai:gpt-5" }`
  */
+/** Bare-model-name prefix → provider inference (when no explicit `provider:` prefix). */
+const PROVIDER_BY_PREFIX: ReadonlyArray<[RegExp, string]> = [
+  [/^claude/i, "anthropic"],
+  [/^(gpt|o\d)/i, "openai"],
+  [/^gemini/i, "google"],
+];
+
 export function normalizeModel(raw: string): {
   provider: string;
   name: string;
@@ -60,8 +68,8 @@ export function normalizeModel(raw: string): {
     const name = trimmed.slice(idx + 1);
     return { provider, name, full: `${provider}:${name}` };
   }
-  // No provider prefix: infer Anthropic for `claude-*`, otherwise default to anthropic.
-  const provider = trimmed.toLowerCase().startsWith("gpt") ? "openai" : "anthropic";
+  // No provider prefix: infer from the model-name prefix, defaulting to anthropic.
+  const provider = PROVIDER_BY_PREFIX.find(([re]) => re.test(trimmed))?.[1] ?? "anthropic";
   return { provider, name: trimmed, full: `${provider}:${trimmed}` };
 }
 
@@ -101,13 +109,29 @@ export function loadConfig(): Config {
     triggerPhrase: core.getInput("trigger_phrase") || "@agent",
     prompt: core.getInput("prompt") || undefined,
     model: normalizeModel(core.getInput("model") || "claude-sonnet-4-6").full,
+    baseUrl: core.getInput("base_url") || undefined,
     allowedPermissions: parseList(core.getInput("allowed_permissions") || "write,admin"),
     allowedCommands: allowedCommands.length ? allowedCommands : DEFAULT_ALLOWED_COMMANDS,
     deniedCommands: [...DEFAULT_DENIED_COMMANDS, ...deniedCommands],
     forkAllowLabel: core.getInput("fork_allow_label") || undefined,
     requirePushApproval: parseBool(core.getInput("require_push_approval")),
+    mcpConfig: core.getInput("mcp_config") || "",
     shellTimeoutSeconds: Number(core.getInput("shell_timeout_seconds")) || 600,
     commentDebounceMs: Number(core.getInput("comment_debounce_ms")) || 8000,
+  };
+}
+
+/**
+ * Apply per-repo overrides on top of the input-derived config. A repo file may
+ * narrow/extend the allow-list and change the model, but the built-in
+ * deny-list is always re-merged so a committed config cannot weaken it.
+ */
+export function mergeRepoConfig(base: Config, repo: RepoConfig): Config {
+  return {
+    ...base,
+    model: repo.model ? normalizeModel(repo.model).full : base.model,
+    allowedCommands: repo.allowedCommands?.length ? repo.allowedCommands : base.allowedCommands,
+    deniedCommands: [...new Set([...base.deniedCommands, ...(repo.deniedCommands ?? [])])],
   };
 }
 
@@ -117,5 +141,7 @@ export function resolveProviderApiKey(): string {
     "PROVIDER_API_KEY",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "OPENROUTER_API_KEY",
   ]);
 }
