@@ -27,11 +27,11 @@ jobs:
   agent:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: <org>/deep-agent-action@v1
+      - uses: dipjyotimetia/deep-agent-action@main
         with:
           trigger_phrase: "@agent"
           prompt: ${{ github.event.inputs.prompt }}
@@ -39,6 +39,10 @@ jobs:
           allowed_commands: "git,npm,pnpm,bun,pytest,go,make"
           # fork_allow_label: "agent-approved"   # opt-in fork support, maintainer-gated
         env:
+          # Required: your model provider key (this is the only secret you must add).
           PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
-          APP_ID: ${{ secrets.AGENT_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+          # Optional: a GitHub App identity. Without it, the workflow's built-in
+          # GITHUB_TOKEN is used automatically — but PRs it opens won't trigger
+          # your other CI workflows. Add an App only if you need that.
+          # APP_ID: ${{ secrets.AGENT_APP_ID }}
+          # APP_PRIVATE_KEY: ${{ secrets.AGENT_APP_PRIVATE_KEY }}

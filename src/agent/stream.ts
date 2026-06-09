@@ -58,7 +58,8 @@ export async function runAgentStream(
   },
 ): Promise<StreamResult> {
   let todos: TodoItem[] = [];
-  let summary = "";
+  let todosKey = "";
+  let finalMessages: unknown[] = [];
   let lastMirrorKey = "";
   let lastMirrorAt = 0;
 
@@ -75,25 +76,18 @@ export async function runAgentStream(
     const { namespace, state } = extractState(item);
     if (!state || typeof state !== "object") continue;
     // Only the main agent (empty namespace) drives the canonical plan/summary.
-    const isMain = namespace.length === 0;
+    if (namespace.length !== 0) continue;
 
-    if (isMain && Array.isArray(state.todos)) {
+    if (Array.isArray(state.todos)) {
       todos = mapTodos(state.todos);
+      todosKey = JSON.stringify(todos); // re-keyed only when the plan changes
     }
-    if (isMain && Array.isArray(state.messages)) {
-      for (const msg of state.messages) {
-        if (messageType(msg) === "ai") {
-          const text = contentToString(msg.content).trim();
-          if (text) summary = text;
-        }
-      }
-    }
+    if (Array.isArray(state.messages)) finalMessages = state.messages;
 
-    if (isMain && options.onProgress) {
-      const key = JSON.stringify(todos);
+    if (options.onProgress) {
       const now = Date.now();
-      if (key !== lastMirrorKey && now - lastMirrorAt >= options.debounceMs) {
-        lastMirrorKey = key;
+      if (todosKey !== lastMirrorKey && now - lastMirrorAt >= options.debounceMs) {
+        lastMirrorKey = todosKey;
         lastMirrorAt = now;
         await options.onProgress(todos);
       }
@@ -101,9 +95,21 @@ export async function runAgentStream(
   }
 
   // Final mirror so the closing plan state is always reflected.
-  if (options.onProgress && JSON.stringify(todos) !== lastMirrorKey) {
+  if (options.onProgress && todosKey !== lastMirrorKey) {
     await options.onProgress(todos);
   }
 
-  return { todos, summary };
+  return { todos, summary: lastAiText(finalMessages) };
+}
+
+/** The text of the last AI message in the final state (the agent's closing summary). */
+function lastAiText(messages: unknown[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (messageType(msg) === "ai") {
+      const text = contentToString((msg as any).content).trim();
+      if (text) return text;
+    }
+  }
+  return "";
 }

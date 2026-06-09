@@ -54,7 +54,6 @@ export function parseContext(raw: RawContext): GitHubContext {
     prHeadRepoFullName: pr?.head?.repo?.full_name,
     prBaseRepoFullName: pr?.base?.repo?.full_name,
     prHeadRef: pr?.head?.ref,
-    prBaseRef: pr?.base?.ref,
     labels,
     payload,
   };

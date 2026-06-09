@@ -48,8 +48,9 @@ inputs:
     description: "GitHub App private key (PEM). May also be supplied via APP_PRIVATE_KEY env."
     required: false
   github_token:
-    description: "Fallback token if no GitHub App is configured. NOTE: PRs opened with GITHUB_TOKEN do not trigger downstream CI."
+    description: "Token for GitHub API/git operations. Defaults to the workflow's GITHUB_TOKEN, so no setup is needed. NOTE: PRs opened with GITHUB_TOKEN do not trigger downstream CI — configure a GitHub App (app_id + app_private_key) only if you need the agent's PRs to run your CI."
     required: false
+    default: ${{ github.token }}
   # --- Reserved for future phases (declared so the input surface is intentional) ---
   execution_mode:
     description: "Reserved. Only 'in_runner' is implemented in v1; 'bridge' (hosted Open SWE) is planned (P1)."

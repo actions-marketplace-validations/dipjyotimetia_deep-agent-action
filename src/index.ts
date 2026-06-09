@@ -1,11 +1,11 @@
 import * as core from "@actions/core";
 import { context } from "@actions/github";
 
-import { loadConfig, resolveProviderApiKey } from "./config.js";
+import { loadConfig, normalizeModel, resolveProviderApiKey } from "./config.js";
 import { parseContext } from "./github/context.js";
 import { detectMode } from "./modes/detector.js";
 import { resolveToken } from "./github/auth.js";
-import { makeOctokit, type Octokit } from "./github/client.js";
+import { makeOctokit, githubServerUrl, type Octokit } from "./github/client.js";
 import { forkRunAllowed } from "./github/fork.js";
 import { checkActorPermission } from "./github/validation/permissions.js";
 import { checkActorIsHuman } from "./github/validation/actor.js";
@@ -25,8 +25,7 @@ import { emitOutputs } from "./outputs.js";
 import type { GitHubContext, RunRecord } from "./types.js";
 
 function runUrl(ctx: GitHubContext): string {
-  const server = process.env.GITHUB_SERVER_URL || "https://github.com";
-  return `${server}/${ctx.owner}/${ctx.repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}`;
+  return `${githubServerUrl()}/${ctx.owner}/${ctx.repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}`;
 }
 
 /** When the event is a PR comment, the payload lacks head/base repo info; fetch it. */
@@ -41,7 +40,6 @@ async function resolvePrRefs(octokit: Octokit, ctx: GitHubContext): Promise<void
     ctx.prHeadRepoFullName = pr.head.repo?.full_name ?? undefined;
     ctx.prBaseRepoFullName = pr.base.repo?.full_name ?? undefined;
     ctx.prHeadRef = pr.head.ref;
-    ctx.prBaseRef = pr.base.ref;
   } catch {
     // Leave fork status undetermined; fork gating treats PRs as untrusted then.
   }
@@ -135,46 +133,53 @@ async function run(): Promise<void> {
     return;
   }
 
-  // P0-3: authorization — ignore bots silently (no loops), refuse under-privileged actors.
-  const human = await checkActorIsHuman(octokit, ctx.actor);
+  // P0-3: authorization — the two checks are independent, so run them together.
+  // Ignore bots silently (no loops); refuse under-privileged actors with a comment.
+  const [human, perm] = await Promise.all([
+    checkActorIsHuman(octokit, ctx.actor),
+    checkActorPermission(octokit, {
+      owner: ctx.owner,
+      repo: ctx.repo,
+      username: ctx.actor,
+      allowed: config.allowedPermissions,
+    }),
+  ]);
   if (!human.ok) {
     core.info(`Ignoring non-human actor: ${human.reason}`);
     record.status = "refused";
     await emitOutputs(record);
     return;
   }
-  const perm = await checkActorPermission(octokit, {
-    owner: ctx.owner,
-    repo: ctx.repo,
-    username: ctx.actor,
-    allowed: config.allowedPermissions,
-  });
   if (!perm.ok) {
     await refuse(octokit, ctx, record, perm.reason!);
     return;
   }
 
-  // P0-5: acknowledge + create the tracking comment.
-  await addEyesReaction(octokit, ctx);
-  const commentId = await createTrackingComment(
-    octokit,
-    ctx,
-    renderTrackingBody({ status: "working", instruction, runUrl: runUrl(ctx) }),
-  );
+  const url = runUrl(ctx);
+  const rootDir = process.env.GITHUB_WORKSPACE || process.cwd();
+
+  // P0-5: acknowledge + create the tracking comment (independent calls).
+  const [, commentId] = await Promise.all([
+    addEyesReaction(octokit, ctx),
+    createTrackingComment(
+      octokit,
+      ctx,
+      renderTrackingBody({ status: "working", instruction, runUrl: url }),
+    ),
+  ]);
 
   const isPRMode = ctx.isPR;
 
   try {
     // PR mode: switch to the PR head so the agent edits the right branch.
     if (isPRMode && ctx.prHeadRef) {
-      const rootDir = process.env.GITHUB_WORKSPACE || process.cwd();
       checkoutPrHead(rootDir, tokenResult.token, ctx.owner, ctx.repo, ctx.prHeadRef);
     }
 
     // P0-6/P0-8/P0-13: build the in-runner agent.
     const apiKey = resolveProviderApiKey();
-    const model = createModel({ provider: config.modelProvider, model: config.modelName, apiKey });
-    const rootDir = process.env.GITHUB_WORKSPACE || process.cwd();
+    const { provider, name } = normalizeModel(config.model);
+    const model = createModel({ provider, model: name, apiKey });
     const agent = buildAgent({
       model,
       rootDir,
@@ -198,7 +203,7 @@ async function run(): Promise<void> {
               octokit,
               ctx,
               commentId,
-              renderTrackingBody({ status: "working", instruction, todos, runUrl: runUrl(ctx) }),
+              renderTrackingBody({ status: "working", instruction, todos, runUrl: url }),
             );
           }
         },
@@ -236,7 +241,7 @@ async function run(): Promise<void> {
           summary: record.summary,
           prUrl: record.prUrl,
           branch: record.branch,
-          runUrl: runUrl(ctx),
+          runUrl: url,
         }),
       );
     }
@@ -257,7 +262,7 @@ async function run(): Promise<void> {
           todos: record.plan,
           summary: record.summary,
           error: message,
-          runUrl: runUrl(ctx),
+          runUrl: url,
         }),
       ).catch(() => {});
     }

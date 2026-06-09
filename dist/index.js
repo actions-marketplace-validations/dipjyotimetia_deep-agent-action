@@ -150770,22 +150770,17 @@ function inputOrEnv(name, envNames) {
   return "";
 }
 function loadConfig() {
-  const rawModel = getInput("model") || "claude-sonnet-4-6";
-  const model = normalizeModel(rawModel);
   const allowedCommands = parseList(getInput("allowed_commands"));
   const deniedCommands = parseList(getInput("denied_commands"));
   return {
     triggerPhrase: getInput("trigger_phrase") || "@agent",
     prompt: getInput("prompt") || undefined,
-    model: model.full,
-    modelProvider: model.provider,
-    modelName: model.name,
+    model: normalizeModel(getInput("model") || "claude-sonnet-4-6").full,
     allowedPermissions: parseList(getInput("allowed_permissions") || "write,admin"),
     allowedCommands: allowedCommands.length ? allowedCommands : DEFAULT_ALLOWED_COMMANDS,
     deniedCommands: [...DEFAULT_DENIED_COMMANDS, ...deniedCommands],
     forkAllowLabel: getInput("fork_allow_label") || undefined,
     requirePushApproval: parseBool(getInput("require_push_approval")),
-    executionMode: "in_runner",
     shellTimeoutSeconds: Number(getInput("shell_timeout_seconds")) || 600,
     commentDebounceMs: Number(getInput("comment_debounce_ms")) || 8000
   };
@@ -150834,7 +150829,6 @@ function parseContext(raw) {
     prHeadRepoFullName: pr?.head?.repo?.full_name,
     prBaseRepoFullName: pr?.base?.repo?.full_name,
     prHeadRef: pr?.head?.ref,
-    prBaseRef: pr?.base?.ref,
     labels,
     payload
   };
@@ -152092,6 +152086,9 @@ async function resolveToken(params) {
 // src/github/client.ts
 function makeOctokit(token) {
   return getOctokit(token);
+}
+function githubServerUrl() {
+  return process.env.GITHUB_SERVER_URL || "https://github.com";
 }
 
 // src/github/fork.ts
@@ -252324,7 +252321,8 @@ function mapTodos(raw) {
 }
 async function runAgentStream(agent, input, options) {
   let todos = [];
-  let summary2 = "";
+  let todosKey = "";
+  let finalMessages = [];
   let lastMirrorKey = "";
   let lastMirrorAt = 0;
   const stream = await agent.stream(input, {
@@ -252337,33 +252335,38 @@ async function runAgentStream(agent, input, options) {
     const { namespace, state } = extractState(item);
     if (!state || typeof state !== "object")
       continue;
-    const isMain = namespace.length === 0;
-    if (isMain && Array.isArray(state.todos)) {
+    if (namespace.length !== 0)
+      continue;
+    if (Array.isArray(state.todos)) {
       todos = mapTodos(state.todos);
+      todosKey = JSON.stringify(todos);
     }
-    if (isMain && Array.isArray(state.messages)) {
-      for (const msg of state.messages) {
-        if (messageType(msg) === "ai") {
-          const text = contentToString(msg.content).trim();
-          if (text)
-            summary2 = text;
-        }
-      }
-    }
-    if (isMain && options.onProgress) {
-      const key = JSON.stringify(todos);
+    if (Array.isArray(state.messages))
+      finalMessages = state.messages;
+    if (options.onProgress) {
       const now = Date.now();
-      if (key !== lastMirrorKey && now - lastMirrorAt >= options.debounceMs) {
-        lastMirrorKey = key;
+      if (todosKey !== lastMirrorKey && now - lastMirrorAt >= options.debounceMs) {
+        lastMirrorKey = todosKey;
         lastMirrorAt = now;
         await options.onProgress(todos);
       }
     }
   }
-  if (options.onProgress && JSON.stringify(todos) !== lastMirrorKey) {
+  if (options.onProgress && todosKey !== lastMirrorKey) {
     await options.onProgress(todos);
   }
-  return { todos, summary: summary2 };
+  return { todos, summary: lastAiText(finalMessages) };
+}
+function lastAiText(messages) {
+  for (let i = messages.length - 1;i >= 0; i--) {
+    const msg = messages[i];
+    if (messageType(msg) === "ai") {
+      const text = contentToString(msg.content).trim();
+      if (text)
+        return text;
+    }
+  }
+  return "";
 }
 
 // src/github/ops.ts
@@ -252391,8 +252394,7 @@ function configureGitIdentity(rootDir, identity) {
   runGit(["config", "user.email", identity.email], rootDir);
 }
 function pushUrl(token, owner, repo) {
-  const server = process.env.GITHUB_SERVER_URL || "https://github.com";
-  const host = server.replace(/^https?:\/\//, "");
+  const host = githubServerUrl().replace(/^https?:\/\//, "");
   return `https://x-access-token:${token}@${host}/${owner}/${repo}.git`;
 }
 function checkoutPrHead(rootDir, token, owner, repo, ref) {
@@ -286701,8 +286703,7 @@ async function uploadAuditRecord(record8) {
 
 // src/index.ts
 function runUrl(ctx) {
-  const server = process.env.GITHUB_SERVER_URL || "https://github.com";
-  return `${server}/${ctx.owner}/${ctx.repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}`;
+  return `${githubServerUrl()}/${ctx.owner}/${ctx.repo}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}`;
 }
 async function resolvePrRefs(octokit, ctx) {
   if (!ctx.isPR || ctx.entityNumber == null || ctx.prHeadRepoFullName)
@@ -286716,7 +286717,6 @@ async function resolvePrRefs(octokit, ctx) {
     ctx.prHeadRepoFullName = pr.head.repo?.full_name ?? undefined;
     ctx.prBaseRepoFullName = pr.base.repo?.full_name ?? undefined;
     ctx.prHeadRef = pr.head.ref;
-    ctx.prBaseRef = pr.base.ref;
   } catch {}
 }
 async function smokeCheck() {
@@ -286785,34 +286785,39 @@ async function run() {
     await refuse(octokit, ctx, record8, fork.reason);
     return;
   }
-  const human = await checkActorIsHuman(octokit, ctx.actor);
+  const [human, perm] = await Promise.all([
+    checkActorIsHuman(octokit, ctx.actor),
+    checkActorPermission(octokit, {
+      owner: ctx.owner,
+      repo: ctx.repo,
+      username: ctx.actor,
+      allowed: config7.allowedPermissions
+    })
+  ]);
   if (!human.ok) {
     info(`Ignoring non-human actor: ${human.reason}`);
     record8.status = "refused";
     await emitOutputs(record8);
     return;
   }
-  const perm = await checkActorPermission(octokit, {
-    owner: ctx.owner,
-    repo: ctx.repo,
-    username: ctx.actor,
-    allowed: config7.allowedPermissions
-  });
   if (!perm.ok) {
     await refuse(octokit, ctx, record8, perm.reason);
     return;
   }
-  await addEyesReaction(octokit, ctx);
-  const commentId = await createTrackingComment(octokit, ctx, renderTrackingBody({ status: "working", instruction, runUrl: runUrl(ctx) }));
+  const url8 = runUrl(ctx);
+  const rootDir = process.env.GITHUB_WORKSPACE || process.cwd();
+  const [, commentId] = await Promise.all([
+    addEyesReaction(octokit, ctx),
+    createTrackingComment(octokit, ctx, renderTrackingBody({ status: "working", instruction, runUrl: url8 }))
+  ]);
   const isPRMode = ctx.isPR;
   try {
     if (isPRMode && ctx.prHeadRef) {
-      const rootDir2 = process.env.GITHUB_WORKSPACE || process.cwd();
-      checkoutPrHead(rootDir2, tokenResult.token, ctx.owner, ctx.repo, ctx.prHeadRef);
+      checkoutPrHead(rootDir, tokenResult.token, ctx.owner, ctx.repo, ctx.prHeadRef);
     }
     const apiKey = resolveProviderApiKey();
-    const model = createModel({ provider: config7.modelProvider, model: config7.modelName, apiKey });
-    const rootDir = process.env.GITHUB_WORKSPACE || process.cwd();
+    const { provider, name } = normalizeModel(config7.model);
+    const model = createModel({ provider, model: name, apiKey });
     const agent = buildAgent({
       model,
       rootDir,
@@ -286827,7 +286832,7 @@ async function run() {
       debounceMs: config7.commentDebounceMs,
       onProgress: async (todos) => {
         if (commentId != null) {
-          await updateTrackingComment(octokit, ctx, commentId, renderTrackingBody({ status: "working", instruction, todos, runUrl: runUrl(ctx) }));
+          await updateTrackingComment(octokit, ctx, commentId, renderTrackingBody({ status: "working", instruction, todos, runUrl: url8 }));
         }
       }
     });
@@ -286856,7 +286861,7 @@ async function run() {
         summary: record8.summary,
         prUrl: record8.prUrl,
         branch: record8.branch,
-        runUrl: runUrl(ctx)
+        runUrl: url8
       }));
     }
     await emitOutputs(record8);
@@ -286871,7 +286876,7 @@ async function run() {
         todos: record8.plan,
         summary: record8.summary,
         error: message,
-        runUrl: runUrl(ctx)
+        runUrl: url8
       })).catch(() => {});
     }
     await emitOutputs(record8);

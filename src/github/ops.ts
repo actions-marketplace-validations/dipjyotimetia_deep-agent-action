@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import type { Octokit } from "./client.js";
+import { githubServerUrl, type Octokit } from "./client.js";
 import type { GitHubContext } from "../types.js";
 
 /** Run git with arguments (no shell — args are passed directly, injection-safe). */
@@ -44,8 +44,7 @@ export function configureGitIdentity(
 
 /** Derive the authenticated push URL (token kept out of persisted git config). */
 function pushUrl(token: string, owner: string, repo: string): string {
-  const server = process.env.GITHUB_SERVER_URL || "https://github.com";
-  const host = server.replace(/^https?:\/\//, "");
+  const host = githubServerUrl().replace(/^https?:\/\//, "");
   return `https://x-access-token:${token}@${host}/${owner}/${repo}.git`;
 }
 

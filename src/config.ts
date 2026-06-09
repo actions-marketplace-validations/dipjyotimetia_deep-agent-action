@@ -94,24 +94,18 @@ function inputOrEnv(name: string, envNames: string[]): string {
 
 /** Load and normalize action inputs from the environment. */
 export function loadConfig(): Config {
-  const rawModel = core.getInput("model") || "claude-sonnet-4-6";
-  const model = normalizeModel(rawModel);
-
   const allowedCommands = parseList(core.getInput("allowed_commands"));
   const deniedCommands = parseList(core.getInput("denied_commands"));
 
   return {
     triggerPhrase: core.getInput("trigger_phrase") || "@agent",
     prompt: core.getInput("prompt") || undefined,
-    model: model.full,
-    modelProvider: model.provider,
-    modelName: model.name,
+    model: normalizeModel(core.getInput("model") || "claude-sonnet-4-6").full,
     allowedPermissions: parseList(core.getInput("allowed_permissions") || "write,admin"),
     allowedCommands: allowedCommands.length ? allowedCommands : DEFAULT_ALLOWED_COMMANDS,
     deniedCommands: [...DEFAULT_DENIED_COMMANDS, ...deniedCommands],
     forkAllowLabel: core.getInput("fork_allow_label") || undefined,
     requirePushApproval: parseBool(core.getInput("require_push_approval")),
-    executionMode: "in_runner",
     shellTimeoutSeconds: Number(core.getInput("shell_timeout_seconds")) || 600,
     commentDebounceMs: Number(core.getInput("comment_debounce_ms")) || 8000,
   };

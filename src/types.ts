@@ -35,7 +35,6 @@ export interface GitHubContext {
   prHeadRepoFullName?: string;
   prBaseRepoFullName?: string;
   prHeadRef?: string;
-  prBaseRef?: string;
   /** Labels on the issue/PR, used for maintainer gating of fork runs. */
   labels: string[];
   /** Raw event payload for anything not normalized above. */
@@ -49,8 +48,6 @@ export interface Config {
   prompt?: string;
   /** Provider-prefixed model id, e.g. "anthropic:claude-sonnet-4-5". */
   model: string;
-  modelProvider: string;
-  modelName: string;
   allowedPermissions: string[];
   allowedCommands: string[];
   deniedCommands: string[];
@@ -58,7 +55,6 @@ export interface Config {
   forkAllowLabel?: string;
   /** Reserved for P1-1 (not implemented in v1). */
   requirePushApproval: boolean;
-  executionMode: "in_runner";
   shellTimeoutSeconds: number;
   /** Minimum interval between tracking-comment edits, ms. */
   commentDebounceMs: number;
