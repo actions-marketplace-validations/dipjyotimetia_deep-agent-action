@@ -1,0 +1,34 @@
+{
+  "name": "deep-agent-action",
+  "version": "0.1.0",
+  "description": "A GitHub Action that runs an issue/PR coding agent powered by the Deep Agents JS harness, in-process on the runner.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun build ./src/index.ts --target=node --outfile=dist/index.js",
+    "verify-dist": "bun run build && git diff --exit-code -- dist/",
+    "smoke": "node dist/index.js",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "dependencies": {
+    "@actions/artifact": "^6.2.1",
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
+    "@langchain/anthropic": "^1.4.0",
+    "@langchain/core": "^1.1.48",
+    "@langchain/langgraph": "^1.3.7",
+    "@langchain/openai": "^1.4.7",
+    "@octokit/auth-app": "^8.2.0",
+    "deepagents": "^1.10.2",
+    "langchain": "^1.4.4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^25.9.2",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3"
+  }
+}

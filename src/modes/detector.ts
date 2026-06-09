@@ -1,0 +1,41 @@
+import type { GitHubContext, Mode } from "../types.js";
+import { checkContainsTrigger } from "../github/validation/trigger.js";
+
+/** PR actions that could carry a mention-triggered instruction. */
+const MENTIONABLE_PR_ACTIONS = new Set(["opened", "reopened", "ready_for_review", "edited"]);
+const MENTIONABLE_ISSUE_ACTIONS = new Set(["opened", "reopened", "edited", "assigned", "labeled"]);
+
+/**
+ * Decide whether this event should run the agent or be a no-op.
+ *
+ * v1 supports two modes:
+ *  - "agent": a mention (or workflow_dispatch prompt) asks the agent to act.
+ *  - "noop": nothing to do; exit cleanly with no side effects.
+ *
+ * Review behaviour on bare `pull_request` events is deferred to P1, so those
+ * events without a mention resolve to "noop".
+ */
+export function detectMode(
+  ctx: GitHubContext,
+  opts: { triggerPhrase: string; prompt?: string },
+): Mode {
+  // workflow_dispatch (or any event) with an explicit prompt always runs the agent.
+  if (opts.prompt && opts.prompt.trim()) return "agent";
+
+  switch (ctx.eventName) {
+    case "issue_comment":
+    case "pull_request_review_comment":
+      return checkContainsTrigger(ctx.triggerText, opts.triggerPhrase) ? "agent" : "noop";
+
+    case "issues":
+      if (!MENTIONABLE_ISSUE_ACTIONS.has(ctx.eventAction ?? "")) return "noop";
+      return checkContainsTrigger(ctx.triggerText, opts.triggerPhrase) ? "agent" : "noop";
+
+    case "pull_request":
+      if (!MENTIONABLE_PR_ACTIONS.has(ctx.eventAction ?? "")) return "noop";
+      return checkContainsTrigger(ctx.triggerText, opts.triggerPhrase) ? "agent" : "noop";
+
+    default:
+      return "noop";
+  }
+}

@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Format check
+        run: bun run format:check
+
+      - name: Test
+        run: bun test
+
+      - name: Build bundle
+        run: bun run build
+
+      # Supply-chain integrity: the committed dist must match the source build.
+      - name: Verify dist is up to date
+        run: git diff --exit-code -- dist/ || (echo "::error::dist/ is stale. Run 'bun run build' and commit." && exit 1)
+
+      # Blocking smoke: actually execute the bundle so a bundled missing-package
+      # error (e.g. provider not statically resolvable) fails CI here, not at runtime.
+      - name: Smoke-run bundle
+        run: DEEP_AGENT_SMOKE=1 node dist/index.js
