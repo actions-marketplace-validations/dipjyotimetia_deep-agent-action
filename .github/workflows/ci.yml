@@ -13,8 +13,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          # Pinned so the committed dist bundle is reproducible against CI's rebuild.
-          bun-version: 1.3.14
+          bun-version: latest
 
       - name: Install
         run: bun install --frozen-lockfile
@@ -28,14 +27,7 @@ jobs:
       - name: Test
         run: bun test
 
-      - name: Build bundle
-        run: bun run build
-
-      # Supply-chain integrity: the committed dist must match the source build.
-      - name: Verify dist is up to date
-        run: git diff --exit-code -- dist/ || (echo "::error::dist/ is stale. Run 'bun run build' and commit." && exit 1)
-
-      # Blocking smoke: actually execute the bundle so a bundled missing-package
-      # error (e.g. provider not statically resolvable) fails CI here, not at runtime.
-      - name: Smoke-run bundle
-        run: DEEP_AGENT_SMOKE=1 node dist/index.js
+      # Smoke: run the action entrypoint from source (as the composite action does)
+      # to prove every provider package loads. Fails CI here, not at runtime.
+      - name: Smoke-run entrypoint
+        run: DEEP_AGENT_SMOKE=1 bun run src/index.ts

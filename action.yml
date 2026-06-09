@@ -83,13 +83,49 @@ inputs:
 outputs:
   status:
     description: "Run outcome: success | skipped | refused | failed."
+    value: ${{ steps.agent.outputs.status }}
   pr_url:
     description: "URL of the opened pull request, if any."
+    value: ${{ steps.agent.outputs.pr_url }}
   branch:
     description: "Branch the agent pushed to, if any."
+    value: ${{ steps.agent.outputs.branch }}
   result_json:
     description: "Machine-readable run record (plan, tool calls, files changed, outcome)."
+    value: ${{ steps.agent.outputs.result_json }}
 
 runs:
-  using: "node24"
-  main: "dist/index.js"
+  using: "composite"
+  steps:
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: "1.3.14"
+    - name: Install action dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: bun install --frozen-lockfile
+    - name: Run Deep Agent
+      id: agent
+      shell: bash
+      run: bun run "${{ github.action_path }}/src/index.ts"
+      env:
+        INPUT_TRIGGER_PHRASE: ${{ inputs.trigger_phrase }}
+        INPUT_PROMPT: ${{ inputs.prompt }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_BASE_URL: ${{ inputs.base_url }}
+        INPUT_MCP_CONFIG: ${{ inputs.mcp_config }}
+        INPUT_ALLOWED_PERMISSIONS: ${{ inputs.allowed_permissions }}
+        INPUT_ALLOWED_COMMANDS: ${{ inputs.allowed_commands }}
+        INPUT_DENIED_COMMANDS: ${{ inputs.denied_commands }}
+        INPUT_FORK_ALLOW_LABEL: ${{ inputs.fork_allow_label }}
+        INPUT_SHELL_TIMEOUT_SECONDS: ${{ inputs.shell_timeout_seconds }}
+        INPUT_COMMENT_DEBOUNCE_MS: ${{ inputs.comment_debounce_ms }}
+        INPUT_PROVIDER_API_KEY: ${{ inputs.provider_api_key }}
+        INPUT_APP_ID: ${{ inputs.app_id }}
+        INPUT_APP_PRIVATE_KEY: ${{ inputs.app_private_key }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_REQUIRE_PUSH_APPROVAL: ${{ inputs.require_push_approval }}
+        INPUT_EXECUTION_MODE: ${{ inputs.execution_mode }}
+        INPUT_LANGGRAPH_URL: ${{ inputs.langgraph_url }}
+        INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}
