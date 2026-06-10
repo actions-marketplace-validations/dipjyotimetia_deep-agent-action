@@ -1,0 +1,64 @@
+# Showcase demo.
+#
+# Manually run the agent on a visible task; it opens a REAL pull request on this
+# repo that you can browse. Unlike the E2E harness, the PR is left open as the
+# demo artifact. Requires the PROVIDER_API_KEY secret.
+name: Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "What should the agent build?"
+        required: true
+        default: "Create demo/BANNER.txt with a fun ASCII-art banner reading 'DEEP AGENT', and add a one-line note to demo/README.md describing it."
+      model:
+        description: "Model id (provider-prefixed)"
+        required: false
+        default: "openai:gpt-4o-mini"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require provider key
+        env:
+          KEY: ${{ secrets.PROVIDER_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::PROVIDER_API_KEY secret is required to run the demo."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run Deep Agent
+        id: agent
+        uses: ./
+        with:
+          model: ${{ github.event.inputs.model }}
+          prompt: ${{ github.event.inputs.prompt }}
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+
+      - name: Write run summary
+        if: always()
+        env:
+          STATUS: ${{ steps.agent.outputs.status }}
+          PR_URL: ${{ steps.agent.outputs.pr_url }}
+          BRANCH: ${{ steps.agent.outputs.branch }}
+        run: |
+          {
+            echo "## 🤖 Deep Agent demo"
+            echo ""
+            echo "**Status:** \`${STATUS:-unknown}\`"
+            if [ -n "$PR_URL" ]; then echo "**Pull request:** $PR_URL"; fi
+            if [ -n "$BRANCH" ]; then echo "**Branch:** \`$BRANCH\`"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

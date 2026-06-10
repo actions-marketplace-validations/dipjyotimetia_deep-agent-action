@@ -3,6 +3,7 @@
 > An AI coding agent for your GitHub issues and pull requests — mention `@agent`, and it plans, edits, runs your toolchain, and opens a PR. Powered by the [Deep Agents](https://www.npmjs.com/package/deepagents) JS harness, running in-process on your runner.
 
 [![CI](https://github.com/dipjyotimetia/deep-agent-action/actions/workflows/ci.yml/badge.svg)](https://github.com/dipjyotimetia/deep-agent-action/actions/workflows/ci.yml)
+[![E2E](https://github.com/dipjyotimetia/deep-agent-action/actions/workflows/e2e.yml/badge.svg)](https://github.com/dipjyotimetia/deep-agent-action/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Built with Bun](https://img.shields.io/badge/built%20with-Bun-000000.svg?logo=bun)](https://bun.sh)
 
@@ -15,6 +16,7 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 - [Why this action](#why-this-action)
 - [Features](#features)
 - [Quickstart](#quickstart)
+- [Demo](#demo)
 - [How it works](#how-it-works)
 - [Usage modes](#usage-modes)
 - [Models & providers](#models--providers)
@@ -105,6 +107,12 @@ The agent posts a tracking comment, works through a plan, and opens a pull reque
 
 > [!TIP]
 > That's the whole setup. Everything else on this page is optional tuning. For a copy-paste-ready file with inline comments, see [`examples/agent.yml`](examples/agent.yml).
+
+## Demo
+
+Want to see it work before wiring it into your repo? Run the **Demo** workflow (**Actions → Demo → Run workflow**) — it runs the agent on a visible task and opens a real pull request you can browse. The [E2E badge](https://github.com/dipjyotimetia/deep-agent-action/actions/workflows/e2e.yml) above also reflects a nightly live run that exercises implement, approval-gate, and review modes against this repo.
+
+See [docs/demo.md](docs/demo.md) for a walkthrough, sample output, and the `result_json` shape.
 
 ## How it works
 
