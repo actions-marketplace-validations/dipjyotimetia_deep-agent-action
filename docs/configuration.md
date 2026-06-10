@@ -91,7 +91,7 @@ Set these under `env:` (usually from `secrets`). Provider keys can come from a g
 
 Resolution order for the provider key: `provider_api_key` input → `PROVIDER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → `GOOGLE_API_KEY` → `OPENROUTER_API_KEY`. See [providers.md](providers.md) for per-provider detail.
 
-> The agent's **shell** never sees these. Secrets are stripped from the agent environment by construction — see [security.md](security.md#secret-free-shell).
+> The agent's **shell** never sees these. Secrets are stripped from the agent environment by construction — see [security.md](security.md#3-secret-free-shell).
 
 ---
 
@@ -125,7 +125,7 @@ system_prompt: |
   the code they cover, and never edit files under generated/.
 model: claude-opus-4-5
 allowed_commands: [git, pnpm, node, pytest]
-denied_commands: [rm, npm]
+denied_commands: [rm]
 ```
 
 ### Merge rules

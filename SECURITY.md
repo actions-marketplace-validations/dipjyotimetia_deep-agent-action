@@ -35,4 +35,4 @@ This project is pre-1.0. Security fixes are applied to the latest `main`. Pin to
 
 ## Best practices for operators
 
-See the [hardening checklist](docs/security.md#hardening-checklist): keep workflow `permissions:` minimal, store keys as secrets, trim `allowed_commands`, leave fork PRs disabled unless triaged, and consider `require_push_approval` on protected repos.
+For operator hardening guidance, see the [hardening checklist](docs/security.md#hardening-checklist) in the security model.

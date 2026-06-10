@@ -210,7 +210,8 @@ Commit an optional `.github/deep-agent.yml` to tune the agent for a repository w
 ```yaml
 # .github/deep-agent.yml
 system_prompt: |
-  This is a TypeScript monorepo. Prefer pnpm. Always add tests next to the code.
+  This is a TypeScript monorepo managed with pnpm. Always co-locate tests with
+  the code they cover, and never edit files under generated/.
 model: claude-opus-4-5
 allowed_commands: [git, pnpm, node, pytest]
 denied_commands: [rm]

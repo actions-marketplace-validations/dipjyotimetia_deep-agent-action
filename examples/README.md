@@ -13,15 +13,4 @@ Copy any of these into `.github/workflows/` in your repository. Each is self-con
 
 ## Optional: per-repo config
 
-Commit a `.github/deep-agent.yml` to tune the agent for a repository without editing the workflow:
-
-```yaml
-# .github/deep-agent.yml
-system_prompt: |
-  This is a TypeScript monorepo managed with pnpm. Co-locate tests with the code.
-model: claude-opus-4-5
-allowed_commands: [git, pnpm, node, pytest]
-denied_commands: [rm]
-```
-
-See [docs/configuration.md](../docs/configuration.md) for the full field reference and merge rules.
+Beyond the workflow, you can commit a `.github/deep-agent.yml` to tune the agent per repository (system prompt, model, command lists). See [docs/configuration.md](../docs/configuration.md#per-repo-config-file) for the example, field reference, and merge rules.
