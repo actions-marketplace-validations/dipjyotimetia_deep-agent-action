@@ -21,6 +21,22 @@ The trigger was seen but the actor wasn't allowed:
 
 The refusal comment names the specific reason.
 
+## "GitHub Actions is not permitted to create or approve pull requests"
+
+The action opens PRs with the `GITHUB_TOKEN`, which GitHub blocks by default. Fix it one of two ways:
+
+- **Enable the setting** (simplest): repo **Settings → Actions → General → Workflow permissions → check "Allow GitHub Actions to create and approve pull requests"**. As a repo admin you can also do it via the API:
+
+  ```bash
+  gh api -X PUT repos/OWNER/REPO/actions/permissions/workflow \
+    -f default_workflow_permissions=read \
+    -F can_approve_pull_request_reviews=true
+  ```
+
+- **Use a GitHub App** (`app_id` + `app_private_key`) — its token isn't subject to this setting, and its PRs also trigger your other CI. See [examples/github-app.yml](../examples/github-app.yml).
+
+Note: the workflow must also grant `permissions: pull-requests: write` (and `contents: write`), as the [examples](../examples/) do.
+
 ## The agent opened a PR, but my CI didn't run on it
 
 This is expected when using the default `GITHUB_TOKEN`: PRs it creates **do not** trigger other workflows (GitHub prevents recursive automation). Fix by giving the agent a **GitHub App** identity — see [examples/github-app.yml](../examples/github-app.yml) and [docs/configuration.md](configuration.md#identity--landing).

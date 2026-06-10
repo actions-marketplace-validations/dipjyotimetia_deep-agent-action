@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { sanitizeBranchName, generateBranchName } from "../src/github/ops.js";
+import { sanitizeBranchName, generateBranchName, explainGitHubError } from "../src/github/ops.js";
 import { makeContext } from "./mockContext.js";
 
 describe("sanitizeBranchName", () => {
@@ -22,5 +22,21 @@ describe("generateBranchName", () => {
   test("dispatch branch when no entity", () => {
     const ctx = makeContext({ isPR: false, entityNumber: undefined });
     expect(generateBranchName(ctx, "5")).toBe("deep-agent/dispatch-5");
+  });
+});
+
+describe("explainGitHubError", () => {
+  test("adds an actionable hint for the create-PR permission error", () => {
+    const out = explainGitHubError(
+      "GitHub Actions is not permitted to create or approve pull requests.",
+    );
+    expect(out).toContain("Allow GitHub Actions to create and approve pull requests");
+    expect(out).toContain("app_id");
+  });
+
+  test("passes unrelated messages through unchanged", () => {
+    expect(explainGitHubError("Validation failed: head sha can't be blank")).toBe(
+      "Validation failed: head sha can't be blank",
+    );
   });
 });

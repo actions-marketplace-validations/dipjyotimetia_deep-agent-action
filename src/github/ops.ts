@@ -7,6 +7,23 @@ function runGit(args: string[], cwd: string): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
+/**
+ * Augment known, common GitHub API failures with an actionable hint. Returns the
+ * original message unchanged when we have no specific guidance.
+ */
+export function explainGitHubError(message: string): string {
+  if (/not permitted to create or approve pull requests/i.test(message)) {
+    return (
+      `${message}\n\n` +
+      `The GITHUB_TOKEN cannot open pull requests until a maintainer enables ` +
+      `"Allow GitHub Actions to create and approve pull requests" under repo ` +
+      `Settings → Actions → General → Workflow permissions — or you configure a ` +
+      `GitHub App via the app_id / app_private_key inputs.`
+    );
+  }
+  return message;
+}
+
 /** Sanitize a string into a valid, safe git branch component. */
 export function sanitizeBranchName(name: string): string {
   return name
@@ -140,15 +157,19 @@ export async function landChanges(params: {
     instruction,
   ].join("\n");
 
-  const pr = await octokit.rest.pulls.create({
-    owner: ctx.owner,
-    repo: ctx.repo,
-    head: branch,
-    base: baseBranch,
-    title,
-    body,
-    draft: params.requireApproval,
-  });
+  const pr = await octokit.rest.pulls
+    .create({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      head: branch,
+      base: baseBranch,
+      title,
+      body,
+      draft: params.requireApproval,
+    })
+    .catch((err: unknown) => {
+      throw new Error(explainGitHubError(err instanceof Error ? err.message : String(err)));
+    });
 
   return { filesChanged, branch, prUrl: pr.data.html_url, approvalPending: params.requireApproval };
 }
