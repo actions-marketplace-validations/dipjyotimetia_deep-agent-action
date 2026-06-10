@@ -1,0 +1,217 @@
+# Live end-to-end test harness.
+#
+# Drives the action AS SHIPPED against this repository with a real model and the
+# real GitHub API, asserting real effects (PR opened, draft created, review
+# posted, audit record emitted) and cleaning up after itself.
+#
+# Runs manually and nightly. All jobs are skipped cleanly when the
+# PROVIDER_API_KEY secret is absent (so forks / no-key runs don't fail).
+# Cost: a few tiny gpt-4o-mini calls — cents per run.
+name: E2E
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC nightly
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  E2E_MODEL: "openai:gpt-4o-mini"
+
+jobs:
+  # Secrets can't be used in job-level `if:`, so expose the presence of the key
+  # as an output the live jobs gate on.
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      has_key: ${{ steps.check.outputs.has_key }}
+    steps:
+      - id: check
+        env:
+          KEY: ${{ secrets.PROVIDER_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::PROVIDER_API_KEY not set; skipping live E2E jobs."
+          fi
+
+  # Feature: implement on workflow_dispatch -> opens a PR. Also validates the
+  # result_json output and the uploaded audit artifact.
+  implement:
+    needs: preflight
+    if: needs.preflight.outputs.has_key == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Run agent (implement)
+        id: agent
+        uses: ./
+        with:
+          model: ${{ env.E2E_MODEL }}
+          prompt: "Create a file demo/E2E_HELLO.md containing a single short greeting line. Do not modify any other files."
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+
+      - name: Assert success + PR opened + result_json shape
+        env:
+          STATUS: ${{ steps.agent.outputs.status }}
+          PR_URL: ${{ steps.agent.outputs.pr_url }}
+          RESULT_JSON: ${{ steps.agent.outputs.result_json }}
+        run: |
+          echo "status=$STATUS pr_url=$PR_URL"
+          test "$STATUS" = "success" || { echo "::error::expected status=success, got '$STATUS'"; exit 1; }
+          test -n "$PR_URL" || { echo "::error::no pr_url output"; exit 1; }
+          printf '%s' "$RESULT_JSON" | EXPECT_STATUS=success bun run scripts/e2e/assert-result.ts
+
+      - name: Download audit artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deep-agent-run
+          path: ./artifact
+
+      - name: Validate audit artifact
+        run: EXPECT_STATUS=success bun run scripts/e2e/assert-result.ts ./artifact/deep-agent-run.json
+
+      - name: Cleanup (close PR + delete branch)
+        if: always() && steps.agent.outputs.pr_url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.agent.outputs.pr_url }}
+        run: gh pr close "$PR_URL" --delete-branch || true
+
+  # Feature: human-in-the-loop gate -> change lands as a DRAFT PR.
+  # Runs after `implement`: both use the same dispatch branch name (derived from
+  # github.run_id) and upload the same audit-artifact name, so they must not run
+  # concurrently. Serializing also lets `implement` claim its artifact first.
+  approval-gate:
+    needs: [preflight, implement]
+    if: needs.preflight.outputs.has_key == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Run agent (approval gate)
+        id: agent
+        uses: ./
+        with:
+          model: ${{ env.E2E_MODEL }}
+          require_push_approval: "true"
+          prompt: "Create a file demo/E2E_APPROVAL.md with a single short line. Do not modify any other files."
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+
+      - name: Assert draft PR + approvalPending
+        env:
+          STATUS: ${{ steps.agent.outputs.status }}
+          PR_URL: ${{ steps.agent.outputs.pr_url }}
+          RESULT_JSON: ${{ steps.agent.outputs.result_json }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$STATUS" = "success" || { echo "::error::status='$STATUS'"; exit 1; }
+          test -n "$PR_URL" || { echo "::error::no pr_url output"; exit 1; }
+          printf '%s' "$RESULT_JSON" | bun run scripts/e2e/assert-result.ts
+          printf '%s' "$RESULT_JSON" | jq -e '.approvalPending == true' >/dev/null \
+            || { echo "::error::expected approvalPending=true in result_json"; exit 1; }
+          IS_DRAFT=$(gh pr view "$PR_URL" --json isDraft -q .isDraft)
+          test "$IS_DRAFT" = "true" || { echo "::error::expected a draft PR, isDraft=$IS_DRAFT"; exit 1; }
+
+      - name: Cleanup (close PR + delete branch)
+        if: always() && steps.agent.outputs.pr_url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.agent.outputs.pr_url }}
+        run: gh pr close "$PR_URL" --delete-branch || true
+
+  # Feature: review mode. Review requires a PR-attached event, so we open a
+  # throwaway PR, drive the action with a synthetic issue_comment event, and
+  # assert a real review was posted (Option A from the design spec).
+  review:
+    needs: [preflight, approval-gate]
+    if: needs.preflight.outputs.has_key == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Install action dependencies
+        run: bun install --production
+
+      - name: Open a throwaway PR to review
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BR="e2e/review-${GITHUB_RUN_ID}"
+          git config user.name "deep-agent-e2e"
+          git config user.email "deep-agent-e2e@users.noreply.github.com"
+          git checkout -b "$BR"
+          mkdir -p demo
+          printf 'alpha\nbravo\ncharlie\n' > demo/E2E_REVIEW_TARGET.txt
+          git add demo/E2E_REVIEW_TARGET.txt
+          git commit -m "e2e: review target"
+          git push origin "$BR"
+          PR_URL=$(gh pr create --base "$GITHUB_REF_NAME" --head "$BR" \
+            --title "e2e: review target (auto)" \
+            --body "Throwaway PR created by the live review E2E. Safe to close.")
+          PR_NUM=$(gh pr view "$PR_URL" --json number -q .number)
+          {
+            echo "branch=$BR"
+            echo "pr_url=$PR_URL"
+            echo "pr_number=$PR_NUM"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build synthetic review event
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          COMMENT_BODY: "@agent review"
+        run: bun run scripts/e2e/build-review-event.ts "$RUNNER_TEMP/event.json"
+
+      - name: Run agent (review)
+        env:
+          GITHUB_EVENT_NAME: issue_comment
+          GITHUB_EVENT_PATH: ${{ runner.temp }}/event.json
+          GITHUB_ACTOR: ${{ github.repository_owner }}
+          INPUT_MODEL: ${{ env.E2E_MODEL }}
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run src/index.ts
+
+      - name: Assert a review was posted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+        run: |
+          COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" -q 'length')
+          echo "reviews posted: ${COUNT:-0}"
+          test "${COUNT:-0}" -ge 1 || { echo "::error::no review was posted on the PR"; exit 1; }
+
+      - name: Cleanup (close PR + delete branch)
+        if: always() && steps.pr.outputs.pr_url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+        run: gh pr close "$PR_URL" --delete-branch || true
