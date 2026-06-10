@@ -18,7 +18,6 @@ export interface ReviewEvent {
     number: number;
     /** Presence of `pull_request` is what marks the issue_comment as PR-attached. */
     pull_request: { url: string };
-    labels: never[];
   };
   comment: { id: number; body: string };
 }
@@ -37,7 +36,6 @@ export function buildReviewEvent(opts: {
     issue: {
       number,
       pull_request: { url: `https://api.github.com/repos/_/_/pulls/${number}` },
-      labels: [],
     },
     comment: { id: Number(opts.commentId ?? 1), body: opts.commentBody || "@agent review" },
   };

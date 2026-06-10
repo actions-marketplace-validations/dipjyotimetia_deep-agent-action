@@ -190,6 +190,9 @@ jobs:
           COMMENT_BODY: "@agent review"
         run: bun run scripts/e2e/build-review-event.ts "$RUNNER_TEMP/event.json"
 
+      # Invoked directly (not `uses: ./`) so we can point the action at the
+      # synthetic event via GITHUB_EVENT_* — the same entry point action.yml runs.
+      # implement/approval use `uses: ./` because they run on the real dispatch event.
       - name: Run agent (review)
         env:
           GITHUB_EVENT_NAME: issue_comment
