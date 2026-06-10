@@ -195,7 +195,7 @@ All inputs are optional.
 | `github_token` | Token for GitHub API/git operations. | `${{ github.token }}` |
 | `require_push_approval` | Gate landing of changes behind human review (draft PR / proposed branch). | `false` |
 
-¹ Default `allowed_commands`: `git, ls, cat, node, npm, npx, pnpm, yarn, bun, python, python3, pip, pytest, go, make, cargo, rustc, sed, grep, find, echo`. Always-on deny-list: `curl, wget, nc, ncat, ssh, scp, sudo, su, telnet, dd, mkfs, shutdown, reboot`. See [docs/configuration.md](docs/configuration.md).
+¹ Default `allowed_commands`: `git, ls, cat, mkdir, touch, cp, mv, node, npm, npx, pnpm, yarn, bun, python, python3, pip, pytest, go, make, cargo, rustc, sed, grep, find, echo`. Always-on deny-list: `curl, wget, nc, ncat, ssh, scp, sudo, su, telnet, dd, mkfs, shutdown, reboot`. See [docs/configuration.md](docs/configuration.md).
 
 > [!NOTE]
 > PRs opened with the default `GITHUB_TOKEN` do **not** trigger your other CI workflows. If you need the agent's PRs to run CI, configure a GitHub App (`app_id` + `app_private_key`). See [examples/github-app.yml](examples/github-app.yml).

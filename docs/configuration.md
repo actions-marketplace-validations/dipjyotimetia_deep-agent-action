@@ -44,7 +44,7 @@ All inputs are optional. Source of truth: [`action.yml`](../action.yml).
 **Default allow-list** (from [`src/config.ts`](../src/config.ts)):
 
 ```
-git, ls, cat, node, npm, npx, pnpm, yarn, bun,
+git, ls, cat, mkdir, touch, cp, mv, node, npm, npx, pnpm, yarn, bun,
 python, python3, pip, pytest, go, make, cargo, rustc,
 sed, grep, find, echo
 ```
