@@ -65,6 +65,8 @@ The deny-list always wins: a command on both lists is blocked. See [security.md]
 | `app_id` / `app_private_key` | — | A GitHub App identity (mints a scoped, short-lived token). Use when you need the agent's PRs to run CI. Also read from `APP_ID` / `APP_PRIVATE_KEY`. |
 | `require_push_approval` | `false` | When `true`, changes land as a draft PR (issue mode) or a proposed branch + compare link (PR mode) instead of landing directly. |
 
+> **Letting `GITHUB_TOKEN` open PRs.** With the default token you must enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"**, or the run fails with _"GitHub Actions is not permitted to create or approve pull requests"_. A GitHub App identity avoids this. See [troubleshooting](troubleshooting.md#github-actions-is-not-permitted-to-create-or-approve-pull-requests).
+
 ### Tools & UX
 
 | Input | Default | Notes |

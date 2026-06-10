@@ -197,8 +197,11 @@ All inputs are optional.
 
 ¹ Default `allowed_commands`: `git, ls, cat, node, npm, npx, pnpm, yarn, bun, python, python3, pip, pytest, go, make, cargo, rustc, sed, grep, find, echo`. Always-on deny-list: `curl, wget, nc, ncat, ssh, scp, sudo, su, telnet, dd, mkfs, shutdown, reboot`. See [docs/configuration.md](docs/configuration.md).
 
+> [!IMPORTANT]
+> The action opens pull requests with the `GITHUB_TOKEN`. For that to work, enable **Settings → Actions → General → Workflow permissions → "Allow GitHub Actions to create and approve pull requests"** (otherwise you'll see _"GitHub Actions is not permitted to create or approve pull requests"_). Alternatively, use a GitHub App (`app_id` + `app_private_key`), which doesn't require this setting.
+
 > [!NOTE]
-> PRs opened with the default `GITHUB_TOKEN` do **not** trigger your other CI workflows. If you need the agent's PRs to run CI, configure a GitHub App (`app_id` + `app_private_key`). See [examples/github-app.yml](examples/github-app.yml).
+> PRs opened with the default `GITHUB_TOKEN` also do **not** trigger your other CI workflows. If you need the agent's PRs to run CI, configure a GitHub App (`app_id` + `app_private_key`). See [examples/github-app.yml](examples/github-app.yml).
 
 ## Outputs
 
