@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A GitHub Action that runs an issue/PR coding agent powered by the Deep Agents JS harness, in-process on the runner.",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",

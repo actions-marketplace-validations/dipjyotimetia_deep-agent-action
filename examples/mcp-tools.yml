@@ -1,0 +1,42 @@
+# Extending the agent with MCP (Model Context Protocol) servers.
+# Copy into .github/workflows/ in the target repository.
+#
+# mcp_config is a JSON string. Each server is either a local command
+# ({ command, args, env }) or a remote URL ({ url }). The servers' tools are
+# exposed to the agent alongside its built-in file/shell tools.
+name: Deep Agent (MCP tools)
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dipjyotimetia/deep-agent-action@main
+        with:
+          model: "claude-sonnet-4-6"
+          # A single local server (HTTP fetch). Use valid JSON on one line, or a
+          # YAML block scalar as below for readability.
+          mcp_config: |
+            {
+              "mcpServers": {
+                "fetch": { "command": "uvx", "args": ["mcp-server-fetch"] }
+              }
+            }
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
