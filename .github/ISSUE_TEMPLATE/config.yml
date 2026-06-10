@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/dipjyotimetia/deep-agent-action#readme
+    about: Setup, configuration, providers, security, and troubleshooting.
+  - name: Report a security vulnerability
+    url: https://github.com/dipjyotimetia/deep-agent-action/security/advisories/new
+    about: Please report vulnerabilities privately — do not open a public issue.

@@ -1,0 +1,35 @@
+# Code-review-only setup.
+# Copy into .github/workflows/ in the target repository.
+#
+# Comment "@agent review" (optionally "@agent review for security issues") on a
+# pull request to get an inline code review. The agent runs read-only in review
+# mode — it never edits files or pushes commits.
+name: Deep Agent Review
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+# Review mode only needs to read code and write review comments.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    # Only run on comments that belong to a pull request.
+    if: github.event.issue.pull_request != null || github.event_name == 'pull_request_review_comment'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dipjyotimetia/deep-agent-action@main
+        with:
+          trigger_phrase: "@agent"
+          model: "claude-sonnet-4-6"
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}

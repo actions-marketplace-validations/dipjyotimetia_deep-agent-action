@@ -1,0 +1,68 @@
+name: Bug report
+description: Report something that isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please don't include secrets or tokens.
+        For security vulnerabilities, do **not** open an issue — see SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+      placeholder: When I commented `@agent ...`, the action ...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this?
+      placeholder: |
+        1. Workflow triggers on ...
+        2. Comment `@agent ...` on ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: run-url
+    attributes:
+      label: Workflow run URL
+      description: Link to the failing Actions run (helps a lot).
+      placeholder: https://github.com/owner/repo/actions/runs/123456789
+    validations:
+      required: false
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Relevant workflow / config
+      description: The `with:` block, any `.github/deep-agent.yml`, and the `status` output. Redact secrets.
+      render: yaml
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Action version
+      description: The ref you pinned (e.g. `@main` or a commit SHA).
+      placeholder: "@main"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model / provider
+      description: The `model` you used.
+      placeholder: claude-sonnet-4-6
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log excerpt from the run. Redact any secrets.
+      render: shell
+    validations:
+      required: false
