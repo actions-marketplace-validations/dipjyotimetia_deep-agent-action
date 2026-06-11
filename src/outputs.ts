@@ -1,11 +1,10 @@
 import * as core from "@actions/core";
-import artifactClient from "@actions/artifact";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunRecord } from "./types.js";
 
-/** Emit Action outputs, a run summary, and the retained audit artifact. */
+/** Emit Action outputs, a run summary, and the retained audit record file. */
 export async function emitOutputs(record: RunRecord): Promise<void> {
   core.setOutput("status", record.status);
   core.setOutput("pr_url", record.prUrl ?? "");
@@ -13,7 +12,7 @@ export async function emitOutputs(record: RunRecord): Promise<void> {
   core.setOutput("result_json", JSON.stringify(record));
 
   await writeSummary(record);
-  await uploadAuditRecord(record);
+  writeAuditRecord(record);
 }
 
 async function writeSummary(record: RunRecord): Promise<void> {
@@ -45,13 +44,16 @@ async function writeSummary(record: RunRecord): Promise<void> {
   }
 }
 
-async function uploadAuditRecord(record: RunRecord): Promise<void> {
+// Write the run record to RUNNER_TEMP for the action's `actions/upload-artifact`
+// step to publish as the `deep-agent-run` artifact. The upload can't happen
+// in-process: ACTIONS_RUNTIME_TOKEN isn't exposed to composite `run:` steps, so
+// only a JS action step (upload-artifact) can authenticate to the artifact API.
+function writeAuditRecord(record: RunRecord): void {
   try {
     const dir = process.env.RUNNER_TEMP || tmpdir();
     const file = join(dir, "deep-agent-run.json");
     writeFileSync(file, JSON.stringify(record, null, 2), "utf8");
-    await artifactClient.uploadArtifact("deep-agent-run", [file], dir);
   } catch {
-    // Artifact upload requires a real runner; never fail the run over it.
+    // Best-effort; never fail the run over the audit record file.
   }
 }

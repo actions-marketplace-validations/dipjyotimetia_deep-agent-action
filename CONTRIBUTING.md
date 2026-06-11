@@ -63,7 +63,7 @@ src/
 test/                      # One *.test.ts per module
 examples/                  # Consumer workflows
 docs/                      # Configuration, providers, security, troubleshooting
-scripts/e2e/               # Live E2E harness helpers (event builder, result validator)
+scripts/e2e/               # Live E2E harness helpers (result validator)
 ```
 
 ## Testing
@@ -78,12 +78,12 @@ Two layers:
 |---|---|
 | `implement` | `workflow_dispatch` + prompt opens a real PR; `status=success`; `result_json` and the `deep-agent-run` artifact are well-formed. |
 | `approval-gate` | `require_push_approval: true` lands the change as a **draft** PR with `approvalPending`. |
-| `review` | Opens a throwaway PR, drives review mode via a synthetic `issue_comment` event, and asserts a real review was posted. |
+
+Review mode is covered by unit tests (`test/review.test.ts`); GitHub forbids overriding `GITHUB_EVENT_*` on the runner, so a PR-attached event can't be synthesized into the live entrypoint.
 
 How to run: **Actions → E2E → Run workflow** (it also runs nightly). It needs the `PROVIDER_API_KEY` repository secret (defaults to `openai:gpt-4o-mini`); when the secret is absent every job **skips cleanly** rather than failing. Each run makes a few tiny model calls — cents. The harness helpers are pure and unit-tested, so you can validate their logic locally without a live run:
 
 ```bash
-PR_NUMBER=1 bun run scripts/e2e/build-review-event.ts        # prints a synthetic event
 echo '{"status":"success","mode":"agent","model":"x","plan":[],"toolCalls":[],"filesChanged":[]}' \
   | bun run scripts/e2e/assert-result.ts                      # validates a result_json
 ```
