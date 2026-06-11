@@ -1,6 +1,7 @@
 name: _probe-env
 on:
-  workflow_dispatch:
+  push:
+    branches: [fix/e2e-audit-artifact-upload]
 jobs:
   probe:
     runs-on: ubuntu-latest
