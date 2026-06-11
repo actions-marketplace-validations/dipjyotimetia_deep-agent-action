@@ -110,7 +110,7 @@ The agent posts a tracking comment, works through a plan, and opens a pull reque
 
 ## Demo
 
-Want to see it work before wiring it into your repo? Run the **Demo** workflow (**Actions → Demo → Run workflow**) — it runs the agent on a visible task and opens a real pull request you can browse. The [E2E badge](https://github.com/dipjyotimetia/deep-agent-action/actions/workflows/e2e.yml) above also reflects a nightly live run that exercises implement, approval-gate, and review modes against this repo.
+Want to see it work before wiring it into your repo? Run the **Demo** workflow (**Actions → Demo → Run workflow**) — it runs the agent on a visible task and opens a real pull request you can browse. The [E2E badge](https://github.com/dipjyotimetia/deep-agent-action/actions/workflows/e2e.yml) above also reflects a nightly live run that exercises the implement and approval-gate modes against this repo.
 
 See [docs/demo.md](docs/demo.md) for a walkthrough, sample output, and the `result_json` shape.
 

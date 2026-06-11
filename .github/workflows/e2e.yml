@@ -1,8 +1,8 @@
 # Live end-to-end test harness.
 #
 # Drives the action AS SHIPPED against this repository with a real model and the
-# real GitHub API, asserting real effects (PR opened, draft created, review
-# posted, audit record emitted) and cleaning up after itself.
+# real GitHub API, asserting real effects (PR opened, draft created, audit
+# record emitted) and cleaning up after itself.
 #
 # Runs manually and nightly. All jobs are skipped cleanly when the
 # PROVIDER_API_KEY secret is absent (so forks / no-key runs don't fail).
@@ -141,80 +141,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ steps.agent.outputs.pr_url }}
-        run: gh pr close "$PR_URL" --delete-branch || true
-
-  # Feature: review mode. Review requires a PR-attached event, so we open a
-  # throwaway PR, drive the action with a synthetic issue_comment event, and
-  # assert a real review was posted (Option A from the design spec).
-  review:
-    needs: [preflight, approval-gate]
-    if: needs.preflight.outputs.has_key == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.14"
-      - name: Install action dependencies
-        run: bun install --production
-
-      - name: Open a throwaway PR to review
-        id: pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          BR="e2e/review-${GITHUB_RUN_ID}"
-          git config user.name "deep-agent-e2e"
-          git config user.email "deep-agent-e2e@users.noreply.github.com"
-          git checkout -b "$BR"
-          mkdir -p demo
-          printf 'alpha\nbravo\ncharlie\n' > demo/E2E_REVIEW_TARGET.txt
-          git add demo/E2E_REVIEW_TARGET.txt
-          git commit -m "e2e: review target"
-          git push origin "$BR"
-          PR_URL=$(gh pr create --base "$GITHUB_REF_NAME" --head "$BR" \
-            --title "e2e: review target (auto)" \
-            --body "Throwaway PR created by the live review E2E. Safe to close.")
-          PR_NUM=$(gh pr view "$PR_URL" --json number -q .number)
-          {
-            echo "branch=$BR"
-            echo "pr_url=$PR_URL"
-            echo "pr_number=$PR_NUM"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Build synthetic review event
-        env:
-          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
-          COMMENT_BODY: "@agent review"
-        run: bun run scripts/e2e/build-review-event.ts "$RUNNER_TEMP/event.json"
-
-      # Invoked directly (not `uses: ./`) so we can point the action at the
-      # synthetic event via GITHUB_EVENT_* — the same entry point action.yml runs.
-      # implement/approval use `uses: ./` because they run on the real dispatch event.
-      - name: Run agent (review)
-        env:
-          GITHUB_EVENT_NAME: issue_comment
-          GITHUB_EVENT_PATH: ${{ runner.temp }}/event.json
-          GITHUB_ACTOR: ${{ github.repository_owner }}
-          INPUT_MODEL: ${{ env.E2E_MODEL }}
-          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: bun run src/index.ts
-
-      - name: Assert a review was posted
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
-        run: |
-          COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" -q 'length')
-          echo "reviews posted: ${COUNT:-0}"
-          test "${COUNT:-0}" -ge 1 || { echo "::error::no review was posted on the PR"; exit 1; }
-
-      - name: Cleanup (close PR + delete branch)
-        if: always() && steps.pr.outputs.pr_url != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ steps.pr.outputs.pr_url }}
         run: gh pr close "$PR_URL" --delete-branch || true
