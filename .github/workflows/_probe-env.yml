@@ -1,0 +1,14 @@
+name: _probe-env
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe GITHUB_EVENT_* override
+        env:
+          GITHUB_EVENT_NAME: issue_comment
+          GITHUB_EVENT_PATH: /tmp/synthetic-event.json
+        run: |
+          echo "GITHUB_EVENT_NAME as seen by shell: '$GITHUB_EVENT_NAME'"
+          echo "GITHUB_EVENT_PATH as seen by shell: '$GITHUB_EVENT_PATH'"
