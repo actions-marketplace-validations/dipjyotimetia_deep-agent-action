@@ -67,6 +67,10 @@ export interface Config {
   shellTimeoutSeconds: number;
   /** Minimum interval between tracking-comment edits, ms. */
   commentDebounceMs: number;
+  /** Abort the run once estimated spend reaches this many USD (needs a known model price). */
+  maxCostUsd?: number;
+  /** Abort the run once cumulative billed tokens (input + output) reach this many. */
+  maxTotalTokens?: number;
 }
 
 /** Token usage for a run. */
@@ -103,4 +107,6 @@ export interface RunRecord {
   costUsd?: number;
   /** True when changes were gated behind approval (draft PR / proposed branch). */
   approvalPending?: boolean;
+  /** True when the run was stopped early by a cost/token budget ceiling. */
+  budgetStopped?: boolean;
 }

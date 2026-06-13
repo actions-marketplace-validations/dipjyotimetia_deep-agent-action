@@ -9,6 +9,7 @@ export async function emitOutputs(record: RunRecord): Promise<void> {
   core.setOutput("status", record.status);
   core.setOutput("pr_url", record.prUrl ?? "");
   core.setOutput("branch", record.branch ?? "");
+  core.setOutput("budget_stopped", record.budgetStopped ? "true" : "false");
   core.setOutput("result_json", JSON.stringify(record));
 
   await writeSummary(record);
@@ -34,6 +35,12 @@ async function writeSummary(record: RunRecord): Promise<void> {
       const cost = record.costUsd != null ? ` (~$${record.costUsd.toFixed(4)})` : "";
       s.addRaw(
         `**Tokens:** ${record.tokens.input} in / ${record.tokens.output} out${cost}\n`,
+        true,
+      );
+    }
+    if (record.budgetStopped) {
+      s.addRaw(
+        "**Budget:** stopped early at the configured cap; partial work opened for review.\n",
         true,
       );
     }

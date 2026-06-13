@@ -122,6 +122,8 @@ export function loadConfig(): Config {
     mcpConfig: core.getInput("mcp_config") || "",
     shellTimeoutSeconds: Number(core.getInput("shell_timeout_seconds")) || 600,
     commentDebounceMs: Number(core.getInput("comment_debounce_ms")) || 8000,
+    maxCostUsd: Number(core.getInput("max_cost_usd")) || undefined,
+    maxTotalTokens: Number(core.getInput("max_total_tokens")) || undefined,
   };
 }
 

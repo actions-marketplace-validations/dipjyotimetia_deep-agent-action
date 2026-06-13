@@ -61,4 +61,21 @@ describe("renderTrackingBody", () => {
     expect(body).toContain("100 in / 50 out");
     expect(body).toContain("$0.0012");
   });
+
+  test("shows a budget banner when stopped early", () => {
+    const body = renderTrackingBody({ status: "success", budgetStopped: true });
+    expect(body).toContain("budget cap");
+  });
+
+  test("embeds the hidden memory block when memory is present", () => {
+    const body = renderTrackingBody({
+      status: "success",
+      memory: [{ instruction: "do x", summary: "did x" }],
+    });
+    expect(body).toContain("<!-- deep-agent:memory:");
+  });
+
+  test("omits the memory block when there is no memory", () => {
+    expect(renderTrackingBody({ status: "working" })).not.toContain("deep-agent:memory");
+  });
 });
