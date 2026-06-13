@@ -1,6 +1,7 @@
 import type { Octokit } from "./client.js";
 import type { GitHubContext, RunStatus, TokenUsage } from "../types.js";
 import type { TodoItem } from "../agent/stream.js";
+import { renderMemoryBlock, type MemoryTurn } from "./memory.js";
 
 const HEADER = "### 🤖 Deep Agent";
 /** Hidden marker used to find this run's sticky tracking comment on re-runs. */
@@ -25,6 +26,10 @@ export interface TrackingState {
   costUsd?: number;
   /** When true, changes are gated behind human review (draft PR / proposed branch). */
   approvalPending?: boolean;
+  /** When true, the run was stopped early by a budget ceiling; show a banner. */
+  budgetStopped?: boolean;
+  /** Per-thread turn history, stored as a hidden block for the next run to read. */
+  memory?: MemoryTurn[];
 }
 
 /** Render the single tracking-comment body from the current state. */
@@ -72,6 +77,12 @@ export function renderTrackingBody(state: TrackingState): string {
   } else if (state.branch) {
     lines.push("", `**Branch:** \`${state.branch}\``);
   }
+  if (state.budgetStopped) {
+    lines.push(
+      "",
+      "⚠️ Stopped at the configured budget cap — any partial changes were opened for review.",
+    );
+  }
   if (state.tokens && (state.tokens.input || state.tokens.output)) {
     const cost = state.costUsd != null ? ` (~$${state.costUsd.toFixed(4)})` : "";
     lines.push("", `_Tokens: ${state.tokens.input} in / ${state.tokens.output} out${cost}_`);
@@ -79,14 +90,20 @@ export function renderTrackingBody(state: TrackingState): string {
   if (state.error) lines.push("", `> ${state.error}`);
   if (state.runUrl) lines.push("", `[View run](${state.runUrl})`);
 
+  // Hidden, machine-only block: per-thread memory for the next run to read.
+  if (state.memory && state.memory.length) lines.push("", renderMemoryBlock(state.memory));
+
   return lines.join("\n");
 }
 
-/** Find an existing sticky tracking comment on the issue/PR (by hidden marker). */
+/**
+ * Find an existing sticky tracking comment on the issue/PR (by hidden marker).
+ * Returns its id and body — the body carries the hidden cross-run memory block.
+ */
 export async function findTrackingComment(
   octokit: Octokit,
   ctx: GitHubContext,
-): Promise<number | undefined> {
+): Promise<{ id: number; body: string } | undefined> {
   if (ctx.entityNumber == null) return undefined;
   try {
     const comments = await octokit.paginate(octokit.rest.issues.listComments, {
@@ -96,7 +113,7 @@ export async function findTrackingComment(
       per_page: 100,
     });
     const found = comments.find((c) => typeof c.body === "string" && c.body.includes(MARKER));
-    return found?.id;
+    return found ? { id: found.id, body: found.body ?? "" } : undefined;
   } catch {
     return undefined;
   }

@@ -75,4 +75,54 @@ describe("runAgentStream", () => {
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.at(-1)).toEqual([{ content: "step 1", status: "completed" }]);
   });
+
+  const budget = { model: "anthropic:claude-sonnet-4-6", maxTotalTokens: 200 };
+  const llmEnd = (input: number, output: number) => ({
+    generations: [
+      [{ text: "", message: { usage_metadata: { input_tokens: input, output_tokens: output } } }],
+    ],
+  });
+
+  test("budget: a meter breach aborts and reports stopped + the meter's tokens", async () => {
+    // The fake stream drives the injected meter past the cap, then throws — as a
+    // real cancelled LangGraph run would.
+    const agent = {
+      stream: async function* (_input: unknown, config: any) {
+        const meter = config.callbacks[0];
+        yield {
+          todos: [{ content: "work", status: "in_progress" }],
+          messages: [new AIMessage("…")],
+        };
+        meter.handleLLMEnd(llmEnd(300, 0)); // crosses the 200 cap → aborts
+        throw new Error("Aborted"); // shape is irrelevant; meter.stopped drives the catch
+      },
+    };
+    const result = await runAgentStream(agent, {}, { ...opts, budget });
+    expect(result.stopped).toBe("budget");
+    expect(result.tokens).toEqual({ input: 300, output: 0 });
+  });
+
+  test("budget: under the cap, completes normally with the meter's tokens", async () => {
+    const agent = {
+      stream: async function* (_input: unknown, config: any) {
+        const meter = config.callbacks[0];
+        meter.handleLLMEnd(llmEnd(50, 10));
+        yield { messages: [new AIMessage("done")] };
+      },
+    };
+    const result = await runAgentStream(agent, {}, { ...opts, budget });
+    expect(result.stopped).toBeUndefined();
+    expect(result.tokens).toEqual({ input: 50, output: 10 });
+    expect(result.summary).toBe("done");
+  });
+
+  test("no budget: a real error still propagates (catch only swallows budget aborts)", async () => {
+    const agent = {
+      stream: async function* () {
+        yield { messages: [] };
+        throw new Error("boom");
+      },
+    };
+    await expect(runAgentStream(agent, {}, opts)).rejects.toThrow("boom");
+  });
 });

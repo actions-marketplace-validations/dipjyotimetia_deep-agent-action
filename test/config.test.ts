@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { normalizeModel, parseList, parseBool } from "../src/config.js";
+import { normalizeModel, parseList, parseBool, parsePositiveNumber } from "../src/config.js";
 
 describe("normalizeModel", () => {
   test("prefixes a bare claude model with anthropic", () => {
@@ -55,5 +55,26 @@ describe("parseBool", () => {
     expect(parseBool("false")).toBe(false);
     expect(parseBool("")).toBe(false);
     expect(parseBool(undefined)).toBe(false);
+  });
+});
+
+describe("parsePositiveNumber", () => {
+  test("returns undefined when unset or blank", () => {
+    expect(parsePositiveNumber(undefined, "x")).toBeUndefined();
+    expect(parsePositiveNumber("", "x")).toBeUndefined();
+    expect(parsePositiveNumber("   ", "x")).toBeUndefined();
+  });
+
+  test("parses a valid positive number", () => {
+    expect(parsePositiveNumber("5", "x")).toBe(5);
+    expect(parsePositiveNumber("0.25", "x")).toBe(0.25);
+    expect(parsePositiveNumber(" 200000 ", "x")).toBe(200000);
+  });
+
+  test("throws on a malformed value (fails closed, not open)", () => {
+    expect(() => parsePositiveNumber("$5", "max_cost_usd")).toThrow("max_cost_usd");
+    expect(() => parsePositiveNumber("abc", "x")).toThrow();
+    expect(() => parsePositiveNumber("0", "x")).toThrow();
+    expect(() => parsePositiveNumber("-3", "x")).toThrow();
   });
 });

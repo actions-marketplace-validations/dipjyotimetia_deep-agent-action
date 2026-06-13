@@ -1,6 +1,8 @@
 import { isAIMessage, isBaseMessage } from "@langchain/core/messages";
 import type { BaseMessage, MessageContent } from "@langchain/core/messages";
 import type { TokenUsage } from "../types.js";
+import { BudgetMeter } from "./budget.js";
+import type { BudgetLimits } from "./cost.js";
 
 export interface TodoItem {
   content: string;
@@ -11,6 +13,13 @@ export interface StreamResult {
   todos: TodoItem[];
   summary: string;
   tokens: TokenUsage;
+  /** Set when the run was aborted early by a budget ceiling. */
+  stopped?: "budget";
+}
+
+/** Budget ceiling for a run, plus the model used to price tokens. */
+export interface BudgetOptions extends BudgetLimits {
+  model: string;
 }
 
 /** Coerce LangChain message content (string | array of parts) to plain text. */
@@ -62,6 +71,8 @@ export async function runAgentStream(
     threadId: string;
     onProgress?: (todos: TodoItem[]) => Promise<void> | void;
     debounceMs: number;
+    /** When set, meter token spend and abort the run if a ceiling is crossed. */
+    budget?: BudgetOptions;
   },
 ): Promise<StreamResult> {
   let todos: TodoItem[] = [];
@@ -70,6 +81,16 @@ export async function runAgentStream(
   let lastMirrorKey = "";
   let lastMirrorAt = 0;
 
+  // A budget cap is enforced by a callback meter (which sees subagent calls too)
+  // plus an AbortController whose signal propagates into subagent invokes. The
+  // two are created together, so they're defined in lockstep.
+  let controller: AbortController | undefined;
+  let meter: BudgetMeter | undefined;
+  if (options.budget) {
+    controller = new AbortController();
+    meter = new BudgetMeter(options.budget.model, options.budget, controller);
+  }
+
   const stream = await agent.stream(input, {
     configurable: { thread_id: options.threadId },
     streamMode: "values",
@@ -77,29 +98,37 @@ export async function runAgentStream(
     // A coding loop (read → edit → test → fix) easily exceeds LangGraph's
     // default of 25 super-steps; raise it so real tasks don't abort mid-run.
     recursionLimit: 150,
+    ...(meter && controller ? { callbacks: [meter], signal: controller.signal } : {}),
   });
 
-  for await (const item of stream) {
-    const { namespace, state } = extractState(item);
-    if (!state || typeof state !== "object") continue;
-    // Only the main agent (empty namespace) drives the canonical plan/summary.
-    if (namespace.length !== 0) continue;
+  try {
+    for await (const item of stream) {
+      const { namespace, state } = extractState(item);
+      if (!state || typeof state !== "object") continue;
+      // Only the main agent (empty namespace) drives the canonical plan/summary.
+      if (namespace.length !== 0) continue;
 
-    const s = state as { todos?: unknown; messages?: unknown };
-    if (Array.isArray(s.todos)) {
-      todos = mapTodos(s.todos);
-      todosKey = JSON.stringify(todos); // re-keyed only when the plan changes
-    }
-    if (Array.isArray(s.messages)) finalMessages = s.messages.filter(isBaseMessage);
+      const s = state as { todos?: unknown; messages?: unknown };
+      if (Array.isArray(s.todos)) {
+        todos = mapTodos(s.todos);
+        todosKey = JSON.stringify(todos); // re-keyed only when the plan changes
+      }
+      if (Array.isArray(s.messages)) finalMessages = s.messages.filter(isBaseMessage);
 
-    if (options.onProgress) {
-      const now = Date.now();
-      if (todosKey !== lastMirrorKey && now - lastMirrorAt >= options.debounceMs) {
-        lastMirrorKey = todosKey;
-        lastMirrorAt = now;
-        await options.onProgress(todos);
+      if (options.onProgress) {
+        const now = Date.now();
+        if (todosKey !== lastMirrorKey && now - lastMirrorAt >= options.debounceMs) {
+          lastMirrorKey = todosKey;
+          lastMirrorAt = now;
+          await options.onProgress(todos);
+        }
       }
     }
+  } catch (err) {
+    // If the meter deliberately aborted, whatever cancellation error the stream
+    // produced is a clean early stop, not a failure — swallow it regardless of
+    // its shape. Any other error propagates.
+    if (!meter?.stopped) throw err;
   }
 
   // Final mirror so the closing plan state is always reflected.
@@ -107,7 +136,17 @@ export async function runAgentStream(
     await options.onProgress(todos);
   }
 
-  return { todos, summary: lastAiText(finalMessages), tokens: sumTokens(finalMessages) };
+  // Report the larger of the meter total (includes subagent spend) and the
+  // message-summed total (covers providers that report usage on messages but
+  // not via callbacks), so a metered run never under-reports vs an unmetered one.
+  const summed = sumTokens(finalMessages);
+  const tokens = meter
+    ? {
+        input: Math.max(meter.total.input, summed.input),
+        output: Math.max(meter.total.output, summed.output),
+      }
+    : summed;
+  return { todos, summary: lastAiText(finalMessages), tokens, stopped: meter?.stopped };
 }
 
 /** Sum input/output tokens across all AI messages in the final state. */

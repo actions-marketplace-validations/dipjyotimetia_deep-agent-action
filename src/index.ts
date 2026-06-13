@@ -19,7 +19,9 @@ import {
   findTrackingComment,
   updateTrackingComment,
   renderTrackingBody,
+  type TrackingState,
 } from "./github/comments.js";
+import { parseMemory, appendTurn, buildMemoryContext, type MemoryTurn } from "./github/memory.js";
 import { createModel } from "./agent/model.js";
 import { buildAgent } from "./agent/createAgent.js";
 import {
@@ -28,7 +30,7 @@ import {
   buildReviewSystemPrompt,
   buildReviewUserMessage,
 } from "./agent/prompt.js";
-import { runAgentStream, type TodoItem } from "./agent/stream.js";
+import { runAgentStream, type TodoItem, type BudgetOptions } from "./agent/stream.js";
 import { loadMcpTools } from "./agent/mcp.js";
 import { estimateCostUsd } from "./agent/cost.js";
 import { checkoutPrHead, landChanges, resolveBotIdentity } from "./github/ops.js";
@@ -69,11 +71,31 @@ async function getOrCreateComment(
   body: string,
 ): Promise<number | undefined> {
   const existing = await findTrackingComment(octokit, ctx);
-  if (existing != null) {
-    await updateTrackingComment(octokit, ctx, existing, body);
-    return existing;
+  return upsertComment(octokit, ctx, existing?.id, body);
+}
+
+/** Update the tracking comment by id when known, else create it. */
+async function upsertComment(
+  octokit: Octokit,
+  ctx: GitHubContext,
+  existingId: number | undefined,
+  body: string,
+): Promise<number | undefined> {
+  if (existingId != null) {
+    await updateTrackingComment(octokit, ctx, existingId, body);
+    return existingId;
   }
   return createTrackingComment(octokit, ctx, body);
+}
+
+/** Build the budget ceiling for the agent stream, or undefined when uncapped. */
+function budgetFrom(config: Config): BudgetOptions | undefined {
+  if (config.maxCostUsd == null && config.maxTotalTokens == null) return undefined;
+  return {
+    model: config.model,
+    maxCostUsd: config.maxCostUsd,
+    maxTotalTokens: config.maxTotalTokens,
+  };
 }
 
 /**
@@ -200,17 +222,30 @@ async function run(): Promise<void> {
 
   const url = runUrl(ctx);
 
-  // P0-5 + M2: acknowledge, create/reuse the tracking comment, and load any MCP
-  // tools — all independent, so run them together.
-  const [, commentId, mcp] = await Promise.all([
+  // P0-5 + M2: acknowledge, find the existing tracking comment, and load any MCP
+  // tools — all independent, so run them together. We find (not yet upsert) the
+  // comment first so prior thread memory is read before we overwrite it.
+  const [, existingComment, mcp] = await Promise.all([
     addEyesReaction(octokit, ctx),
-    getOrCreateComment(
-      octokit,
-      ctx,
-      renderTrackingBody({ status: "working", instruction, runUrl: url }),
-    ),
+    findTrackingComment(octokit, ctx),
     loadMcpTools(config.mcpConfig),
   ]);
+
+  // Cross-run memory: parse the prior turns once, then route the working,
+  // progress, success, and failure renders through a closure that re-embeds the
+  // memory block by default. Only the final success render overrides `memory`
+  // (to append the new turn). (The pre-authorization `refuse()` path renders
+  // before this point and intentionally does not preserve memory.)
+  const priorMemory = parseMemory(existingComment?.body);
+  const renderBody = (state: TrackingState): string =>
+    renderTrackingBody({ ...state, memory: state.memory ?? priorMemory });
+
+  const commentId = await upsertComment(
+    octokit,
+    ctx,
+    existingComment?.id,
+    renderBody({ status: "working", instruction, runUrl: url }),
+  );
 
   try {
     const apiKey = resolveProviderApiKey();
@@ -231,6 +266,8 @@ async function run(): Promise<void> {
         commentId,
         url,
         mcpTools: mcp.tools,
+        renderBody,
+        priorMemory,
       });
     } else {
       await runImplement({
@@ -247,6 +284,8 @@ async function run(): Promise<void> {
         commentId,
         url,
         mcpTools: mcp.tools,
+        renderBody,
+        priorMemory,
       });
     }
     await emitOutputs(record);
@@ -260,7 +299,7 @@ async function run(): Promise<void> {
         octokit,
         ctx,
         commentId,
-        renderTrackingBody({
+        renderBody({
           status: "failed",
           instruction,
           todos: record.plan,
@@ -292,6 +331,10 @@ interface FlowParams {
   commentId: number | undefined;
   url: string;
   mcpTools: Parameters<typeof buildAgent>[0]["extraTools"];
+  /** Renders a tracking-comment body, re-embedding the thread memory block. */
+  renderBody: (state: TrackingState) => string;
+  /** Prior turns on this thread, fed back as context and appended to on success. */
+  priorMemory: MemoryTurn[];
 }
 
 /** The progress-mirror callback shared by both flows: reflect the plan into the tracking comment. */
@@ -302,7 +345,7 @@ function mirrorProgress(p: FlowParams): (todos: TodoItem[]) => Promise<void> {
         p.octokit,
         p.ctx,
         p.commentId,
-        renderTrackingBody({ status: "working", instruction: p.instruction, todos, runUrl: p.url }),
+        p.renderBody({ status: "working", instruction: p.instruction, todos, runUrl: p.url }),
       );
     }
   };
@@ -332,18 +375,29 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
 
   const result = await runAgentStream(
     agent,
-    { messages: [{ role: "user", content: buildUserMessage(instruction, ctx) }] },
+    {
+      messages: [
+        {
+          role: "user",
+          content: buildUserMessage(instruction, ctx, buildMemoryContext(p.priorMemory)),
+        },
+      ],
+    },
     {
       threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "dispatch"}`,
       debounceMs: config.commentDebounceMs,
       onProgress: mirrorProgress(p),
+      budget: budgetFrom(config),
     },
   );
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
   record.summary = result.summary;
+  record.budgetStopped = result.stopped === "budget";
 
-  // P0-7 + M4: commit + open PR / push, gated by approval when configured.
+  // P0-7 + M4: commit + open PR / push, gated by approval when configured. A
+  // budget stop forces the approval path so partial work lands as a draft for
+  // review rather than directly on a branch.
   const identity = await resolveBotIdentity(octokit, p.appSlug);
   const land = await landChanges({
     octokit,
@@ -354,7 +408,7 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
     instruction,
     identity,
     branchSuffix: process.env.GITHUB_RUN_ID || "run",
-    requireApproval: config.requirePushApproval,
+    requireApproval: config.requirePushApproval || record.budgetStopped,
   });
   record.filesChanged = land.filesChanged;
   record.branch = land.branch;
@@ -367,7 +421,7 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
       octokit,
       ctx,
       commentId,
-      renderTrackingBody({
+      p.renderBody({
         status: "success",
         instruction,
         todos: record.plan,
@@ -375,9 +429,15 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
         prUrl: record.prUrl,
         branch: record.branch,
         approvalPending: record.approvalPending,
+        budgetStopped: record.budgetStopped,
         tokens: record.tokens,
         costUsd: record.costUsd,
         runUrl: url,
+        memory: appendTurn(p.priorMemory, {
+          instruction,
+          summary: record.summary ?? "",
+          prUrl: record.prUrl,
+        }),
       }),
     );
   }
@@ -408,15 +468,24 @@ async function runReview(p: FlowParams): Promise<void> {
 
   const result = await runAgentStream(
     agent,
-    { messages: [{ role: "user", content: buildReviewUserMessage(instruction, files) }] },
+    {
+      messages: [
+        {
+          role: "user",
+          content: buildReviewUserMessage(instruction, files, buildMemoryContext(p.priorMemory)),
+        },
+      ],
+    },
     {
       threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "review"}`,
       debounceMs: config.commentDebounceMs,
       onProgress: mirrorProgress(p),
+      budget: budgetFrom(config),
     },
   );
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
+  record.budgetStopped = result.stopped === "budget";
 
   // Read the findings the agent wrote (file-handoff), then post the review.
   const review = readFindings(rootDir, result.summary);
@@ -429,13 +498,15 @@ async function runReview(p: FlowParams): Promise<void> {
       octokit,
       ctx,
       commentId,
-      renderTrackingBody({
+      p.renderBody({
         status: "success",
         instruction,
         summary: `${record.summary}\n\n${review.summary}`,
+        budgetStopped: record.budgetStopped,
         tokens: record.tokens,
         costUsd: record.costUsd,
         runUrl: url,
+        memory: appendTurn(p.priorMemory, { instruction, summary: record.summary ?? "" }),
       }),
     );
   }

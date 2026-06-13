@@ -27,11 +27,16 @@ export function buildSystemPrompt(ctx: GitHubContext, opts: { isPRMode: boolean 
 }
 
 /** Build the initial user message containing the resolved instruction. */
-export function buildUserMessage(instruction: string, ctx: GitHubContext): string {
+export function buildUserMessage(
+  instruction: string,
+  ctx: GitHubContext,
+  memoryContext?: string,
+): string {
   const where = ctx.entityNumber
     ? `${ctx.isPR ? "pull request" : "issue"} #${ctx.entityNumber}`
     : "a manual dispatch";
-  return `The following request was made on ${where}:\n\n${instruction}`;
+  const request = `The following request was made on ${where}:\n\n${instruction}`;
+  return memoryContext ? `${memoryContext}\n\n${request}` : request;
 }
 
 /** System prompt for code-review mode: read-only, write findings to a file. */
@@ -56,6 +61,7 @@ export function buildReviewSystemPrompt(ctx: GitHubContext): string {
 export function buildReviewUserMessage(
   instruction: string,
   files: { filename: string; patch?: string }[],
+  memoryContext?: string,
 ): string {
   const diff = files
     .map(
@@ -64,6 +70,7 @@ export function buildReviewUserMessage(
     )
     .join("\n\n");
   return [
+    ...(memoryContext ? [memoryContext, ""] : []),
     instruction ? `Review request: ${instruction}` : "Review this pull request.",
     "",
     "Changed files:",
