@@ -49,7 +49,9 @@ export function parseContext(raw: RawContext): GitHubContext {
 
   const isPullRequestReviewComment = eventName === "pull_request_review_comment";
 
-  const labels: string[] = (issue?.labels ?? pr?.labels ?? []).map((l: Label) => l.name);
+  const labels: string[] = (issue?.labels ?? pr?.labels ?? [])
+    .map((l: Label) => l.name)
+    .filter(Boolean);
 
   return {
     eventName,
@@ -62,10 +64,11 @@ export function parseContext(raw: RawContext): GitHubContext {
     triggerText,
     commentId: comment?.id,
     isPullRequestReviewComment,
-    // head.repo can be null (fork from a deleted repo); base.repo is always present.
-    prHeadRepoFullName: pr?.head.repo?.full_name,
-    prBaseRepoFullName: pr?.base.repo.full_name,
-    prHeadRef: pr?.head.ref,
+    // Optional-chain throughout so a malformed payload degrades instead of
+    // throwing (head.repo is also null for a fork from a deleted repo).
+    prHeadRepoFullName: pr?.head?.repo?.full_name,
+    prBaseRepoFullName: pr?.base?.repo?.full_name,
+    prHeadRef: pr?.head?.ref,
     labels,
     payload,
   };
