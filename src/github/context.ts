@@ -1,4 +1,10 @@
-import { z } from "zod";
+import type {
+  Issue,
+  IssueComment,
+  Label,
+  PullRequest,
+  PullRequestReviewComment,
+} from "@octokit/webhooks-types";
 import type { context } from "@actions/github";
 import type { GitHubContext } from "../types.js";
 
@@ -14,57 +20,18 @@ export interface RawContext {
 }
 
 /**
- * Permissive schema for just the slice of the webhook payload we read. Every
- * field is optional and `.catch`ed so a malformed branch degrades to `undefined`
- * instead of collapsing the whole parse (this feeds gating, so resilience
- * matters). `looseObject` keeps unrecognized keys.
- */
-const LabelSchema = z.union([z.string(), z.looseObject({ name: z.string().optional() })]);
-const RepoRefSchema = z.looseObject({ full_name: z.string().optional() });
-const PrRefSchema = z.looseObject({
-  ref: z.string().optional(),
-  repo: RepoRefSchema.optional().catch(undefined),
-});
-const PullRequestSchema = z.looseObject({
-  number: z.number().optional().catch(undefined),
-  title: z.string().optional().catch(undefined),
-  body: z.string().optional().catch(undefined),
-  labels: z.array(LabelSchema).optional().catch(undefined),
-  head: PrRefSchema.optional().catch(undefined),
-  base: PrRefSchema.optional().catch(undefined),
-});
-const IssueSchema = z.looseObject({
-  number: z.number().optional().catch(undefined),
-  title: z.string().optional().catch(undefined),
-  body: z.string().optional().catch(undefined),
-  labels: z.array(LabelSchema).optional().catch(undefined),
-  pull_request: z.unknown().optional(),
-});
-const PayloadSchema = z.looseObject({
-  action: z.string().optional().catch(undefined),
-  issue: IssueSchema.optional().catch(undefined),
-  pull_request: PullRequestSchema.optional().catch(undefined),
-  comment: z
-    .looseObject({
-      id: z.number().optional().catch(undefined),
-      body: z.string().optional().catch(undefined),
-    })
-    .optional()
-    .catch(undefined),
-});
-
-/**
  * Normalize the raw GitHub Actions context + webhook payload into our typed view.
  * Pure function — pass a RawContext so it can be unit-tested without the runner.
  */
 export function parseContext(raw: RawContext): GitHubContext {
-  const { eventName } = raw;
-  const payload = PayloadSchema.safeParse(raw.payload).data ?? {};
-  const eventAction = payload.action;
+  const { eventName, payload } = raw;
+  const eventAction: string | undefined = payload.action;
 
-  const issue = payload.issue;
-  const pr = payload.pull_request;
-  const comment = payload.comment;
+  // @actions/github types the payload loosely (`[key: string]: any`); narrow the
+  // slices we read to the official @octokit/webhooks-types shapes.
+  const issue = payload.issue as Issue | undefined;
+  const pr = payload.pull_request as PullRequest | undefined;
+  const comment = payload.comment as IssueComment | PullRequestReviewComment | undefined;
 
   // Is this event attached to a pull request?
   const isPR =
@@ -82,9 +49,7 @@ export function parseContext(raw: RawContext): GitHubContext {
 
   const isPullRequestReviewComment = eventName === "pull_request_review_comment";
 
-  const labels: string[] = (issue?.labels ?? pr?.labels ?? [])
-    .map((l) => (typeof l === "string" ? l : l.name))
-    .filter((name): name is string => Boolean(name));
+  const labels: string[] = (issue?.labels ?? pr?.labels ?? []).map((l: Label) => l.name);
 
   return {
     eventName,
@@ -97,10 +62,11 @@ export function parseContext(raw: RawContext): GitHubContext {
     triggerText,
     commentId: comment?.id,
     isPullRequestReviewComment,
-    prHeadRepoFullName: pr?.head?.repo?.full_name,
-    prBaseRepoFullName: pr?.base?.repo?.full_name,
-    prHeadRef: pr?.head?.ref,
+    // head.repo can be null (fork from a deleted repo); base.repo is always present.
+    prHeadRepoFullName: pr?.head.repo?.full_name,
+    prBaseRepoFullName: pr?.base.repo.full_name,
+    prHeadRef: pr?.head.ref,
     labels,
-    payload: raw.payload,
+    payload,
   };
 }
