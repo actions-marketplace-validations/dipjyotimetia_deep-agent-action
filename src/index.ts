@@ -231,10 +231,11 @@ async function run(): Promise<void> {
     loadMcpTools(config.mcpConfig),
   ]);
 
-  // Cross-run memory: parse the prior turns once, then route every comment
-  // render through a closure that re-embeds the memory block by default. Only
-  // the final success render overrides `memory` (to append the new turn), so no
-  // call site can accidentally drop a thread's history.
+  // Cross-run memory: parse the prior turns once, then route the working,
+  // progress, success, and failure renders through a closure that re-embeds the
+  // memory block by default. Only the final success render overrides `memory`
+  // (to append the new turn). (The pre-authorization `refuse()` path renders
+  // before this point and intentionally does not preserve memory.)
   const priorMemory = parseMemory(existingComment?.body);
   const renderBody = (state: TrackingState): string =>
     renderTrackingBody({ ...state, memory: state.memory ?? priorMemory });

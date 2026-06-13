@@ -82,12 +82,14 @@ export async function runAgentStream(
   let lastMirrorAt = 0;
 
   // A budget cap is enforced by a callback meter (which sees subagent calls too)
-  // plus an AbortController whose signal propagates into subagent invokes.
-  const controller = options.budget ? new AbortController() : undefined;
-  const meter =
-    options.budget && controller
-      ? new BudgetMeter(options.budget.model, options.budget, controller)
-      : undefined;
+  // plus an AbortController whose signal propagates into subagent invokes. The
+  // two are created together, so they're defined in lockstep.
+  let controller: AbortController | undefined;
+  let meter: BudgetMeter | undefined;
+  if (options.budget) {
+    controller = new AbortController();
+    meter = new BudgetMeter(options.budget.model, options.budget, controller);
+  }
 
   const stream = await agent.stream(input, {
     configurable: { thread_id: options.threadId },
@@ -96,7 +98,7 @@ export async function runAgentStream(
     // A coding loop (read → edit → test → fix) easily exceeds LangGraph's
     // default of 25 super-steps; raise it so real tasks don't abort mid-run.
     recursionLimit: 150,
-    ...(meter ? { callbacks: [meter], signal: controller!.signal } : {}),
+    ...(meter && controller ? { callbacks: [meter], signal: controller.signal } : {}),
   });
 
   try {
