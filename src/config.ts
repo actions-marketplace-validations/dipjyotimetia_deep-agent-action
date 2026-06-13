@@ -82,6 +82,22 @@ export function parseBool(raw: string | undefined): boolean {
   return /^(true|1|yes)$/i.test((raw ?? "").trim());
 }
 
+/**
+ * Parse an optional positive-number input. Undefined when unset; **throws** on a
+ * malformed value. Budget caps are a safety control with no safe default, so a
+ * typo (e.g. `"$5"`) must fail the run loudly rather than silently disable the
+ * cap and run unbounded.
+ */
+export function parsePositiveNumber(raw: string | undefined, name: string): number | undefined {
+  const t = (raw ?? "").trim();
+  if (!t) return undefined;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`${name} must be a positive number; got "${raw}".`);
+  }
+  return n;
+}
+
 /** Parse a comma/newline-separated list into a trimmed, de-duplicated array. */
 export function parseList(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -122,8 +138,8 @@ export function loadConfig(): Config {
     mcpConfig: core.getInput("mcp_config") || "",
     shellTimeoutSeconds: Number(core.getInput("shell_timeout_seconds")) || 600,
     commentDebounceMs: Number(core.getInput("comment_debounce_ms")) || 8000,
-    maxCostUsd: Number(core.getInput("max_cost_usd")) || undefined,
-    maxTotalTokens: Number(core.getInput("max_total_tokens")) || undefined,
+    maxCostUsd: parsePositiveNumber(core.getInput("max_cost_usd"), "max_cost_usd"),
+    maxTotalTokens: parsePositiveNumber(core.getInput("max_total_tokens"), "max_total_tokens"),
   };
 }
 

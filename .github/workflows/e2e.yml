@@ -142,3 +142,57 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ steps.agent.outputs.pr_url }}
         run: gh pr close "$PR_URL" --delete-branch || true
+
+  # Feature: budget circuit-breaker -> a tiny token cap aborts the run mid-flight
+  # and sets budget_stopped. This is the one thing unit tests can't prove: that
+  # the callback meter + AbortSignal actually fire end-to-end through the
+  # deepagents/LangGraph stack. If any partial work was committed before the
+  # abort, the forced-approval path must land it as a DRAFT.
+  # Serialized after the others (shared run_id branch name + audit-artifact name).
+  budget-cap:
+    needs: [preflight, approval-gate]
+    if: needs.preflight.outputs.has_key == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Run agent (budget cap)
+        id: agent
+        uses: ./
+        with:
+          model: ${{ env.E2E_MODEL }}
+          # A cap below a single model call's token count guarantees the run trips
+          # on the first response, exercising the abort path deterministically.
+          max_total_tokens: "50"
+          prompt: "Create a file demo/E2E_BUDGET.md with a single short line. Do not modify any other files."
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+
+      - name: Assert budget_stopped (+ draft PR if any partial work landed)
+        env:
+          STATUS: ${{ steps.agent.outputs.status }}
+          BUDGET_STOPPED: ${{ steps.agent.outputs.budget_stopped }}
+          PR_URL: ${{ steps.agent.outputs.pr_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "status=$STATUS budget_stopped=$BUDGET_STOPPED pr_url=$PR_URL"
+          test "$STATUS" = "success" || { echo "::error::status='$STATUS'"; exit 1; }
+          test "$BUDGET_STOPPED" = "true" \
+            || { echo "::error::expected budget_stopped=true, got '$BUDGET_STOPPED'"; exit 1; }
+          if [ -n "$PR_URL" ]; then
+            IS_DRAFT=$(gh pr view "$PR_URL" --json isDraft -q .isDraft)
+            test "$IS_DRAFT" = "true" \
+              || { echo "::error::partial work must land as a draft, isDraft=$IS_DRAFT"; exit 1; }
+          fi
+
+      - name: Cleanup (close PR + delete branch)
+        if: always() && steps.agent.outputs.pr_url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.agent.outputs.pr_url }}
+        run: gh pr close "$PR_URL" --delete-branch || true

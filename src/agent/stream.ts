@@ -136,8 +136,16 @@ export async function runAgentStream(
     await options.onProgress(todos);
   }
 
-  // The meter's total includes subagent spend, so prefer it when metering.
-  const tokens = meter ? meter.total : sumTokens(finalMessages);
+  // Report the larger of the meter total (includes subagent spend) and the
+  // message-summed total (covers providers that report usage on messages but
+  // not via callbacks), so a metered run never under-reports vs an unmetered one.
+  const summed = sumTokens(finalMessages);
+  const tokens = meter
+    ? {
+        input: Math.max(meter.total.input, summed.input),
+        output: Math.max(meter.total.output, summed.output),
+      }
+    : summed;
   return { todos, summary: lastAiText(finalMessages), tokens, stopped: meter?.stopped };
 }
 
