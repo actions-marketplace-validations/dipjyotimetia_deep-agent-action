@@ -1,6 +1,16 @@
 import * as core from "@actions/core";
+import { z } from "zod";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { DynamicStructuredTool } from "@langchain/core/tools";
+
+/**
+ * Light structural check: the config must be a plain object — either the
+ * documented `{ mcpServers: { ... } }` form or a flat `{ name: connection }`
+ * map, both of which `MultiServerMCPClient` accepts. We deliberately don't model
+ * the full server-config union here (it would drift from the library); the
+ * constructor still validates the details.
+ */
+const McpConfigSchema = z.looseObject({});
 
 export interface McpHandle {
   tools: DynamicStructuredTool[];
@@ -27,6 +37,11 @@ export async function loadMcpTools(configJson: string): Promise<McpHandle> {
     core.warning(
       `Ignoring mcp_config: invalid JSON (${err instanceof Error ? err.message : err}).`,
     );
+    return EMPTY;
+  }
+
+  if (!McpConfigSchema.safeParse(parsed).success) {
+    core.warning('Ignoring mcp_config: expected a JSON object (e.g. { "mcpServers": { ... } }).');
     return EMPTY;
   }
 

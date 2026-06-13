@@ -32,4 +32,9 @@ describe("parseFindings", () => {
     expect(parseFindings(null)).toEqual({ summary: "", findings: [] });
     expect(parseFindings({ findings: "nope" })).toEqual({ summary: "", findings: [] });
   });
+
+  test("salvages valid findings around a malformed (non-object) element", () => {
+    const r = parseFindings({ findings: [null, 42, { path: "a.ts", line: 1, body: "x" }] });
+    expect(r.findings).toEqual([{ path: "a.ts", line: 1, body: "x" }]);
+  });
 });

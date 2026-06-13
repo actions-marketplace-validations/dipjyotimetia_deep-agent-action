@@ -1,3 +1,10 @@
+import type {
+  Issue,
+  IssueComment,
+  Label,
+  PullRequest,
+  PullRequestReviewComment,
+} from "@octokit/webhooks-types";
 import type { context } from "@actions/github";
 import type { GitHubContext } from "../types.js";
 
@@ -18,11 +25,13 @@ export interface RawContext {
  */
 export function parseContext(raw: RawContext): GitHubContext {
   const { eventName, payload } = raw;
-  const eventAction: string | undefined = payload?.action;
+  const eventAction: string | undefined = payload.action;
 
-  const issue = payload?.issue;
-  const pr = payload?.pull_request;
-  const comment = payload?.comment;
+  // @actions/github types the payload loosely (`[key: string]: any`); narrow the
+  // slices we read to the official @octokit/webhooks-types shapes.
+  const issue = payload.issue as Issue | undefined;
+  const pr = payload.pull_request as PullRequest | undefined;
+  const comment = payload.comment as IssueComment | PullRequestReviewComment | undefined;
 
   // Is this event attached to a pull request?
   const isPR =
@@ -41,7 +50,7 @@ export function parseContext(raw: RawContext): GitHubContext {
   const isPullRequestReviewComment = eventName === "pull_request_review_comment";
 
   const labels: string[] = (issue?.labels ?? pr?.labels ?? [])
-    .map((l: unknown) => (typeof l === "string" ? l : (l as { name?: string })?.name))
+    .map((l: Label) => l.name)
     .filter(Boolean);
 
   return {
@@ -55,6 +64,8 @@ export function parseContext(raw: RawContext): GitHubContext {
     triggerText,
     commentId: comment?.id,
     isPullRequestReviewComment,
+    // Optional-chain throughout so a malformed payload degrades instead of
+    // throwing (head.repo is also null for a fork from a deleted repo).
     prHeadRepoFullName: pr?.head?.repo?.full_name,
     prBaseRepoFullName: pr?.base?.repo?.full_name,
     prHeadRef: pr?.head?.ref,
