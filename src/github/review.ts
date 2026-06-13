@@ -1,4 +1,5 @@
 import * as core from "@actions/core";
+import { z } from "zod";
 import type { Octokit } from "./client.js";
 import type { GitHubContext } from "../types.js";
 
@@ -12,6 +13,23 @@ export interface ReviewResult {
   summary: string;
   findings: ReviewFinding[];
 }
+
+/**
+ * Schema for the agent-written findings JSON. Fields are coerced (not rejected)
+ * to mirror the prior lenient `String()`/`Number()` behavior — `String(x ?? "")`
+ * and `Number(x ?? 0)` — so malformed entries become empty/zero and are dropped
+ * by the caller's filter rather than aborting the parse.
+ */
+const FindingSchema = z.object({
+  path: z.unknown().transform((v) => String(v ?? "")),
+  line: z.unknown().transform((v) => Number(v ?? 0)),
+  body: z.unknown().transform((v) => String(v ?? "")),
+});
+
+const ReviewResultSchema = z.object({
+  summary: z.string().catch(""),
+  findings: z.array(FindingSchema).catch([]),
+});
 
 /** Path (relative to the workspace) the review agent writes its findings to. */
 export const REVIEW_FINDINGS_FILE = ".deep-agent-review.json";
@@ -33,21 +51,11 @@ export async function fetchPrFiles(
 
 /** Validate/coerce the agent-written findings JSON (pure, testable). */
 export function parseFindings(raw: unknown): ReviewResult {
-  const r = (raw ?? {}) as Record<string, unknown>;
-  const summary = typeof r.summary === "string" ? r.summary : "";
-  const findings: ReviewFinding[] = Array.isArray(r.findings)
-    ? r.findings
-        .map((f: unknown) => {
-          const rec = (f ?? {}) as { path?: unknown; line?: unknown; body?: unknown };
-          return {
-            path: String(rec.path ?? ""),
-            line: Number(rec.line ?? 0),
-            body: String(rec.body ?? ""),
-          };
-        })
-        .filter((f) => f.path && f.line > 0 && f.body)
-    : [];
-  return { summary, findings };
+  const { summary, findings } = ReviewResultSchema.safeParse(raw ?? {}).data ?? {
+    summary: "",
+    findings: [],
+  };
+  return { summary, findings: findings.filter((f) => f.path && f.line > 0 && f.body) };
 }
 
 /**

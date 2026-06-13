@@ -1,3 +1,5 @@
+import { isAIMessage, isBaseMessage } from "@langchain/core/messages";
+import type { BaseMessage, MessageContent } from "@langchain/core/messages";
 import type { TokenUsage } from "../types.js";
 
 export interface TodoItem {
@@ -12,22 +14,13 @@ export interface StreamResult {
 }
 
 /** Coerce LangChain message content (string | array of parts) to plain text. */
-function contentToString(content: unknown): string {
+function contentToString(content: MessageContent): string {
   if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part: unknown) =>
-        typeof part === "string" ? part : ((part as { text?: string })?.text ?? ""),
-      )
-      .join("");
-  }
-  return "";
-}
-
-/** Return the message type ("ai", "tool", ...) across LangChain versions. */
-function messageType(msg: unknown): string | undefined {
-  const m = msg as { getType?: () => string; _getType?: () => string; type?: string };
-  return m?.getType?.() ?? m?._getType?.() ?? m?.type;
+  return content
+    .map((part) =>
+      typeof part !== "string" && "text" in part && typeof part.text === "string" ? part.text : "",
+    )
+    .join("");
 }
 
 /** Normalize a streamed item into { namespace, state } regardless of tuple shape. */
@@ -73,7 +66,7 @@ export async function runAgentStream(
 ): Promise<StreamResult> {
   let todos: TodoItem[] = [];
   let todosKey = "";
-  let finalMessages: unknown[] = [];
+  let finalMessages: BaseMessage[] = [];
   let lastMirrorKey = "";
   let lastMirrorAt = 0;
 
@@ -97,7 +90,7 @@ export async function runAgentStream(
       todos = mapTodos(s.todos);
       todosKey = JSON.stringify(todos); // re-keyed only when the plan changes
     }
-    if (Array.isArray(s.messages)) finalMessages = s.messages;
+    if (Array.isArray(s.messages)) finalMessages = s.messages.filter(isBaseMessage);
 
     if (options.onProgress) {
       const now = Date.now();
@@ -118,26 +111,24 @@ export async function runAgentStream(
 }
 
 /** Sum input/output tokens across all AI messages in the final state. */
-function sumTokens(messages: unknown[]): TokenUsage {
+function sumTokens(messages: BaseMessage[]): TokenUsage {
   let input = 0;
   let output = 0;
   for (const msg of messages) {
-    const usage = (msg as { usage_metadata?: { input_tokens?: number; output_tokens?: number } })
-      ?.usage_metadata;
-    if (usage) {
-      input += Number(usage.input_tokens ?? 0);
-      output += Number(usage.output_tokens ?? 0);
+    if (isAIMessage(msg) && msg.usage_metadata) {
+      input += msg.usage_metadata.input_tokens ?? 0;
+      output += msg.usage_metadata.output_tokens ?? 0;
     }
   }
   return { input, output };
 }
 
 /** The text of the last AI message in the final state (the agent's closing summary). */
-function lastAiText(messages: unknown[]): string {
+function lastAiText(messages: BaseMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (messageType(msg) === "ai") {
-      const text = contentToString((msg as { content?: unknown }).content).trim();
+    if (msg && isAIMessage(msg)) {
+      const text = contentToString(msg.content).trim();
       if (text) return text;
     }
   }
