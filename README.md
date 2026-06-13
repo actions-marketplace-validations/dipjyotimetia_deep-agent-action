@@ -37,7 +37,7 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 | **Setup** | Copy one workflow, add one secret. No app install wizard, no hosted backend. |
 | **Where it runs** | In-process on your runner — your code never leaves your CI. |
 | **Models** | 8 providers: Anthropic, OpenAI, Azure OpenAI, Google Gemini, OpenRouter, any OpenAI-compatible endpoint, AWS Bedrock, GCP Vertex AI. |
-| **Safety** | Command allow/deny guardrails, secret-free shell, fork-PR protection, permission gating, and an optional human-approval gate — on by default or one flag away. |
+| **Safety** | Command allow/deny guardrails, secret-free shell, fork-PR protection, permission gating, an optional human-approval gate, and optional cost/token spend caps — on by default or one flag away. |
 | **Feedback** | A single sticky comment shows a live plan, progress, the PR link, and token/cost estimates. |
 
 ## Features
@@ -49,6 +49,8 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 - ✋ **Human-in-the-loop gate** — optionally require approval before changes land (draft PR or proposed branch + compare link).
 - 📌 **Sticky progress comment** — one comment, updated in place, with a live checklist, summary, PR link, and token/cost estimate.
 - 💰 **Cost reporting** — token usage and an estimated USD cost surfaced in the comment, job summary, and machine-readable output.
+- 🛑 **Spend caps** — optional `max_cost_usd` / `max_total_tokens` ceilings stop a run the moment it crosses the limit (counting subagent spend too) and land the partial work as a draft for review.
+- 🧠 **Cross-run memory** — a compact history of prior `@agent` turns on the same issue/PR is carried forward as context on the next mention. No backend; stored in the sticky comment.
 - 🛡️ **Shell guardrails** — an allow-list and an always-on deny-list for shell commands, plus a secret-free environment.
 - 🍴 **Fork-PR protection** — fork PRs are denied by default; maintainers opt in per-PR with a label.
 - 🧰 **MCP tools** — connect Model Context Protocol servers to extend what the agent can do.
@@ -194,6 +196,8 @@ All inputs are optional.
 | `app_private_key` | GitHub App private key (PEM). Also read from `APP_PRIVATE_KEY`. | — |
 | `github_token` | Token for GitHub API/git operations. | `${{ github.token }}` |
 | `require_push_approval` | Gate landing of changes behind human review (draft PR / proposed branch). | `false` |
+| `max_cost_usd` | Abort the run once estimated spend reaches this many USD; partial work lands as a draft. Requires a known model price — pair with `max_total_tokens` for unpriced models. | — (no cap) |
+| `max_total_tokens` | Abort once cumulative billed tokens (input + output) reach this many; partial work lands as a draft. Re-counted each model call as context grows, so set it generously. | — (no cap) |
 
 ¹ Default `allowed_commands`: `git, ls, cat, mkdir, touch, cp, mv, node, npm, npx, pnpm, yarn, bun, python, python3, pip, pytest, go, make, cargo, rustc, sed, grep, find, echo`. Always-on deny-list: `curl, wget, nc, ncat, ssh, scp, sudo, su, telnet, dd, mkfs, shutdown, reboot`. See [docs/configuration.md](docs/configuration.md).
 
@@ -210,6 +214,7 @@ All inputs are optional.
 | `status` | Run outcome: `success` \| `skipped` \| `refused` \| `failed`. |
 | `pr_url` | URL of the opened pull request (or compare link), if any. |
 | `branch` | Branch the agent pushed to, if any. |
+| `budget_stopped` | `true` when a cost/token cap stopped the run early (partial work opened for review). |
 | `result_json` | Machine-readable run record (plan, files changed, tokens, cost, outcome). |
 
 Every run also writes a job summary and uploads a `deep-agent-run` artifact (`deep-agent-run.json`) as an audit record.

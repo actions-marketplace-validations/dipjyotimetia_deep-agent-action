@@ -67,6 +67,17 @@ The deny-list always wins: a command on both lists is blocked. See [security.md]
 
 > **Letting `GITHUB_TOKEN` open PRs.** With the default token you must enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"**, or the run fails with _"GitHub Actions is not permitted to create or approve pull requests"_. A GitHub App identity avoids this. See [troubleshooting](troubleshooting.md#github-actions-is-not-permitted-to-create-or-approve-pull-requests).
 
+### Cost controls
+
+Both are unset by default (no cap). A cap is metered across **every** model call — the main agent and its subagents — and aborts the run the instant a ceiling is crossed; the partial work then lands through the approval path (a draft PR / proposed branch) for review, and the `budget_stopped` output is set to `true`.
+
+| Input | Default | Notes |
+|---|---|---|
+| `max_cost_usd` | — | Abort once estimated spend reaches this many USD. **Requires a known model price** (see [`src/agent/cost.ts`](../src/agent/cost.ts)); on an unpriced model it never fires, so pair it with `max_total_tokens`. |
+| `max_total_tokens` | — | Abort once cumulative billed tokens (input + output) reach this many. The count is **re-evaluated on each model call as the context grows**, not a running sum of fresh tokens — set it generously. |
+
+A malformed value (e.g. `"$5"` or a negative number) fails the run loudly rather than silently disabling the cap — a budget control has no safe default.
+
 ### Tools & UX
 
 | Input | Default | Notes |

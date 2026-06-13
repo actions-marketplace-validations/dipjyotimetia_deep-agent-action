@@ -46,6 +46,8 @@ jobs:
           allowed_commands: "git,npm,pnpm,bun,pytest,go,make"
           # require_push_approval: "true"        # gate changes behind review (draft PR / proposed branch)
           # fork_allow_label: "agent-approved"   # opt-in fork support, maintainer-gated
+          # max_cost_usd: "2.00"                 # stop the run at ~$2 spend; partial work lands as a draft (needs a known model price)
+          # max_total_tokens: "500000"           # or cap by tokens; re-counted each model call as context grows, so set it generously
           # base_url: "https://api.groq.com/openai/v1"        # for model: "openai-compatible:..."
           # mcp_config: '{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}'
         env:
