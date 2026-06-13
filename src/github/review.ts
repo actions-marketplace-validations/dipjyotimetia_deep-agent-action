@@ -15,15 +15,19 @@ export interface ReviewResult {
 }
 
 /**
- * Schema for the agent-written findings JSON. Fields are coerced (not rejected)
- * to mirror the prior lenient `String()`/`Number()` behavior — `String(x ?? "")`
- * and `Number(x ?? 0)` — so malformed entries become empty/zero and are dropped
- * by the caller's filter rather than aborting the parse.
+ * Schema for one agent-written finding. Coerces at the *element* level (via
+ * `z.unknown()`, which accepts non-objects like `null`) to mirror the prior
+ * lenient `String(x ?? "")` / `Number(x ?? 0)` behavior: malformed entries
+ * become empty/zero and are dropped by the caller's filter rather than failing
+ * the surrounding array — so one bad element never discards the whole batch.
  */
-const FindingSchema = z.object({
-  path: z.unknown().transform((v) => String(v ?? "")),
-  line: z.unknown().transform((v) => Number(v ?? 0)),
-  body: z.unknown().transform((v) => String(v ?? "")),
+const FindingSchema = z.unknown().transform((f) => {
+  const r = (f ?? {}) as { path?: unknown; line?: unknown; body?: unknown };
+  return {
+    path: String(r.path ?? ""),
+    line: Number(r.line ?? 0),
+    body: String(r.body ?? ""),
+  };
 });
 
 const ReviewResultSchema = z.object({
