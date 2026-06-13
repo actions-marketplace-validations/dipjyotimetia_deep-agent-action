@@ -1,11 +1,15 @@
+import type { context } from "@actions/github";
 import type { GitHubContext } from "../types.js";
+
+/** The webhook event payload, as typed by @actions/github's context. */
+type WebhookPayload = (typeof context)["payload"];
 
 /** Minimal shape of the @actions/github context we consume. Kept narrow for testability. */
 export interface RawContext {
   eventName: string;
   actor: string;
   repo: { owner: string; repo: string };
-  payload: Record<string, any>;
+  payload: WebhookPayload;
 }
 
 /**
@@ -37,7 +41,7 @@ export function parseContext(raw: RawContext): GitHubContext {
   const isPullRequestReviewComment = eventName === "pull_request_review_comment";
 
   const labels: string[] = (issue?.labels ?? pr?.labels ?? [])
-    .map((l: any) => (typeof l === "string" ? l : l?.name))
+    .map((l: unknown) => (typeof l === "string" ? l : (l as { name?: string })?.name))
     .filter(Boolean);
 
   return {

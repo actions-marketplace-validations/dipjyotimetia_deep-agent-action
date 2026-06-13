@@ -1,18 +1,5 @@
 import type { Octokit } from "../client.js";
 
-/** Octokit subset needed to check collaborator permission. */
-export interface PermissionApi {
-  rest: {
-    repos: {
-      getCollaboratorPermissionLevel: (params: {
-        owner: string;
-        repo: string;
-        username: string;
-      }) => Promise<{ data: { permission?: string } }>;
-    };
-  };
-}
-
 /**
  * Decide if a permission level is sufficient. `maintain` implies write access,
  * so it satisfies a `write` requirement.
@@ -31,7 +18,7 @@ export function isPermitted(permission: string | undefined, allowed: string[]): 
  * Returns a refusal reason string when not permitted, otherwise null.
  */
 export async function checkActorPermission(
-  octokit: PermissionApi | Octokit,
+  octokit: Octokit,
   params: { owner: string; repo: string; username: string; allowed: string[] },
 ): Promise<{ ok: boolean; permission?: string; reason?: string }> {
   try {

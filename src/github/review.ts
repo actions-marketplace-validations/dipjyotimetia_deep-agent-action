@@ -37,11 +37,14 @@ export function parseFindings(raw: unknown): ReviewResult {
   const summary = typeof r.summary === "string" ? r.summary : "";
   const findings: ReviewFinding[] = Array.isArray(r.findings)
     ? r.findings
-        .map((f: any) => ({
-          path: String(f?.path ?? ""),
-          line: Number(f?.line ?? 0),
-          body: String(f?.body ?? ""),
-        }))
+        .map((f: unknown) => {
+          const rec = (f ?? {}) as { path?: unknown; line?: unknown; body?: unknown };
+          return {
+            path: String(rec.path ?? ""),
+            line: Number(rec.line ?? 0),
+            body: String(rec.body ?? ""),
+          };
+        })
         .filter((f) => f.path && f.line > 0 && f.body)
     : [];
   return { summary, findings };

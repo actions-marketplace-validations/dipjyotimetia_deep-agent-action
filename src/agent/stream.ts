@@ -16,19 +16,22 @@ function contentToString(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .map((part: any) => (typeof part === "string" ? part : (part?.text ?? "")))
+      .map((part: unknown) =>
+        typeof part === "string" ? part : ((part as { text?: string })?.text ?? ""),
+      )
       .join("");
   }
   return "";
 }
 
 /** Return the message type ("ai", "tool", ...) across LangChain versions. */
-function messageType(msg: any): string | undefined {
-  return msg?.getType?.() ?? msg?._getType?.() ?? msg?.type;
+function messageType(msg: unknown): string | undefined {
+  const m = msg as { getType?: () => string; _getType?: () => string; type?: string };
+  return m?.getType?.() ?? m?._getType?.() ?? m?.type;
 }
 
 /** Normalize a streamed item into { namespace, state } regardless of tuple shape. */
-function extractState(item: unknown): { namespace: unknown[]; state: any } {
+function extractState(item: unknown): { namespace: unknown[]; state: unknown } {
   if (Array.isArray(item)) {
     const namespace = Array.isArray(item[0]) ? (item[0] as unknown[]) : [];
     return { namespace, state: item[item.length - 1] };
@@ -38,10 +41,13 @@ function extractState(item: unknown): { namespace: unknown[]; state: any } {
 
 function mapTodos(raw: unknown): TodoItem[] {
   if (!Array.isArray(raw)) return [];
-  return raw.map((t: any) => ({
-    content: String(t?.content ?? ""),
-    status: String(t?.status ?? "pending"),
-  }));
+  return raw.map((t: unknown) => {
+    const r = (t ?? {}) as { content?: unknown; status?: unknown };
+    return {
+      content: String(r.content ?? ""),
+      status: String(r.status ?? "pending"),
+    };
+  });
 }
 
 /**
@@ -52,8 +58,13 @@ function mapTodos(raw: unknown): TodoItem[] {
  * `debounceMs` and only when the plan changes; a final mirror always runs.
  */
 export async function runAgentStream(
-  agent: { stream: (input: any, options?: any) => any },
-  input: any,
+  // The DeepAgent harness types its stream input as a complex, version-specific
+  // state type; `any` here keeps the call site assignable across versions. The
+  // result is narrowed to an async iterable since we only `for await` over it.
+  agent: {
+    stream: (input: any, options?: any) => AsyncIterable<unknown> | Promise<AsyncIterable<unknown>>;
+  },
+  input: unknown,
   options: {
     threadId: string;
     onProgress?: (todos: TodoItem[]) => Promise<void> | void;
@@ -81,11 +92,12 @@ export async function runAgentStream(
     // Only the main agent (empty namespace) drives the canonical plan/summary.
     if (namespace.length !== 0) continue;
 
-    if (Array.isArray(state.todos)) {
-      todos = mapTodos(state.todos);
+    const s = state as { todos?: unknown; messages?: unknown };
+    if (Array.isArray(s.todos)) {
+      todos = mapTodos(s.todos);
       todosKey = JSON.stringify(todos); // re-keyed only when the plan changes
     }
-    if (Array.isArray(state.messages)) finalMessages = state.messages;
+    if (Array.isArray(s.messages)) finalMessages = s.messages;
 
     if (options.onProgress) {
       const now = Date.now();
@@ -110,7 +122,8 @@ function sumTokens(messages: unknown[]): TokenUsage {
   let input = 0;
   let output = 0;
   for (const msg of messages) {
-    const usage = (msg as any)?.usage_metadata;
+    const usage = (msg as { usage_metadata?: { input_tokens?: number; output_tokens?: number } })
+      ?.usage_metadata;
     if (usage) {
       input += Number(usage.input_tokens ?? 0);
       output += Number(usage.output_tokens ?? 0);
@@ -124,7 +137,7 @@ function lastAiText(messages: unknown[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (messageType(msg) === "ai") {
-      const text = contentToString((msg as any).content).trim();
+      const text = contentToString((msg as { content?: unknown }).content).trim();
       if (text) return text;
     }
   }
