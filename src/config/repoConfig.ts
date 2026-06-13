@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import * as core from "@actions/core";
+import { z } from "zod";
 
 /** Per-repo overrides committed to the repository (optional). */
 export interface RepoConfig {
@@ -13,15 +14,30 @@ export interface RepoConfig {
 
 const CONFIG_PATHS = [".github/deep-agent.yml", ".github/deep-agent.yaml", ".deep-agent.yml"];
 
+/**
+ * Schema for the committed YAML (snake_case keys), mapped to a camelCase
+ * RepoConfig. Each field is independently `.catch`ed so one malformed value
+ * never discards the rest; unknown keys are stripped.
+ */
+const RepoConfigSchema = z
+  .object({
+    system_prompt: z.string().optional().catch(undefined),
+    allowed_commands: z.array(z.coerce.string()).optional().catch(undefined),
+    denied_commands: z.array(z.coerce.string()).optional().catch(undefined),
+    model: z.string().optional().catch(undefined),
+  })
+  .transform((r): RepoConfig => {
+    const cfg: RepoConfig = {};
+    if (r.system_prompt !== undefined) cfg.systemPrompt = r.system_prompt;
+    if (r.allowed_commands !== undefined) cfg.allowedCommands = r.allowed_commands;
+    if (r.denied_commands !== undefined) cfg.deniedCommands = r.denied_commands;
+    if (r.model !== undefined) cfg.model = r.model;
+    return cfg;
+  });
+
 /** Coerce a parsed YAML object into a typed RepoConfig (pure, testable). */
 export function normalizeRepoConfig(raw: unknown): RepoConfig {
-  const r = (raw ?? {}) as Record<string, unknown>;
-  const cfg: RepoConfig = {};
-  if (typeof r.system_prompt === "string") cfg.systemPrompt = r.system_prompt;
-  if (Array.isArray(r.allowed_commands)) cfg.allowedCommands = r.allowed_commands.map(String);
-  if (Array.isArray(r.denied_commands)) cfg.deniedCommands = r.denied_commands.map(String);
-  if (typeof r.model === "string") cfg.model = r.model;
-  return cfg;
+  return RepoConfigSchema.safeParse(raw ?? {}).data ?? {};
 }
 
 /**

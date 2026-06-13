@@ -1,14 +1,5 @@
 import type { Octokit } from "../client.js";
 
-/** Octokit subset needed to resolve an actor's account type. */
-export interface ActorApi {
-  rest: {
-    users: {
-      getByUsername: (params: { username: string }) => Promise<{ data: { type?: string } }>;
-    };
-  };
-}
-
 /** True when the login looks like a GitHub App / bot account (`name[bot]`). */
 export function looksLikeBotLogin(login: string): boolean {
   return /\[bot\]$/i.test(login) || login.toLowerCase() === "github-actions[bot]";
@@ -20,7 +11,7 @@ export function looksLikeBotLogin(login: string): boolean {
  * prevents the action from triggering itself in a loop.
  */
 export async function checkActorIsHuman(
-  octokit: ActorApi | Octokit,
+  octokit: Octokit,
   username: string,
 ): Promise<{ ok: boolean; reason?: string }> {
   if (looksLikeBotLogin(username)) {

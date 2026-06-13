@@ -120,7 +120,7 @@ async function run(): Promise<void> {
     eventName: context.eventName,
     actor: context.actor,
     repo: context.repo,
-    payload: context.payload as Record<string, any>,
+    payload: context.payload,
   });
   const rootDir = process.env.GITHUB_WORKSPACE || process.cwd();
 

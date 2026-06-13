@@ -1,3 +1,5 @@
+import { isAIMessage, isBaseMessage } from "@langchain/core/messages";
+import type { BaseMessage, MessageContent } from "@langchain/core/messages";
 import type { TokenUsage } from "../types.js";
 
 export interface TodoItem {
@@ -12,23 +14,17 @@ export interface StreamResult {
 }
 
 /** Coerce LangChain message content (string | array of parts) to plain text. */
-function contentToString(content: unknown): string {
+function contentToString(content: MessageContent): string {
   if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part: any) => (typeof part === "string" ? part : (part?.text ?? "")))
-      .join("");
-  }
-  return "";
-}
-
-/** Return the message type ("ai", "tool", ...) across LangChain versions. */
-function messageType(msg: any): string | undefined {
-  return msg?.getType?.() ?? msg?._getType?.() ?? msg?.type;
+  return content
+    .map((part) =>
+      typeof part !== "string" && "text" in part && typeof part.text === "string" ? part.text : "",
+    )
+    .join("");
 }
 
 /** Normalize a streamed item into { namespace, state } regardless of tuple shape. */
-function extractState(item: unknown): { namespace: unknown[]; state: any } {
+function extractState(item: unknown): { namespace: unknown[]; state: unknown } {
   if (Array.isArray(item)) {
     const namespace = Array.isArray(item[0]) ? (item[0] as unknown[]) : [];
     return { namespace, state: item[item.length - 1] };
@@ -38,10 +34,13 @@ function extractState(item: unknown): { namespace: unknown[]; state: any } {
 
 function mapTodos(raw: unknown): TodoItem[] {
   if (!Array.isArray(raw)) return [];
-  return raw.map((t: any) => ({
-    content: String(t?.content ?? ""),
-    status: String(t?.status ?? "pending"),
-  }));
+  return raw.map((t: unknown) => {
+    const r = (t ?? {}) as { content?: unknown; status?: unknown };
+    return {
+      content: String(r.content ?? ""),
+      status: String(r.status ?? "pending"),
+    };
+  });
 }
 
 /**
@@ -52,8 +51,13 @@ function mapTodos(raw: unknown): TodoItem[] {
  * `debounceMs` and only when the plan changes; a final mirror always runs.
  */
 export async function runAgentStream(
-  agent: { stream: (input: any, options?: any) => any },
-  input: any,
+  // The DeepAgent harness types its stream input as a complex, version-specific
+  // state type; `any` here keeps the call site assignable across versions. The
+  // result is narrowed to an async iterable since we only `for await` over it.
+  agent: {
+    stream: (input: any, options?: any) => AsyncIterable<unknown> | Promise<AsyncIterable<unknown>>;
+  },
+  input: unknown,
   options: {
     threadId: string;
     onProgress?: (todos: TodoItem[]) => Promise<void> | void;
@@ -62,7 +66,7 @@ export async function runAgentStream(
 ): Promise<StreamResult> {
   let todos: TodoItem[] = [];
   let todosKey = "";
-  let finalMessages: unknown[] = [];
+  let finalMessages: BaseMessage[] = [];
   let lastMirrorKey = "";
   let lastMirrorAt = 0;
 
@@ -81,11 +85,12 @@ export async function runAgentStream(
     // Only the main agent (empty namespace) drives the canonical plan/summary.
     if (namespace.length !== 0) continue;
 
-    if (Array.isArray(state.todos)) {
-      todos = mapTodos(state.todos);
+    const s = state as { todos?: unknown; messages?: unknown };
+    if (Array.isArray(s.todos)) {
+      todos = mapTodos(s.todos);
       todosKey = JSON.stringify(todos); // re-keyed only when the plan changes
     }
-    if (Array.isArray(state.messages)) finalMessages = state.messages;
+    if (Array.isArray(s.messages)) finalMessages = s.messages.filter(isBaseMessage);
 
     if (options.onProgress) {
       const now = Date.now();
@@ -106,25 +111,24 @@ export async function runAgentStream(
 }
 
 /** Sum input/output tokens across all AI messages in the final state. */
-function sumTokens(messages: unknown[]): TokenUsage {
+function sumTokens(messages: BaseMessage[]): TokenUsage {
   let input = 0;
   let output = 0;
   for (const msg of messages) {
-    const usage = (msg as any)?.usage_metadata;
-    if (usage) {
-      input += Number(usage.input_tokens ?? 0);
-      output += Number(usage.output_tokens ?? 0);
+    if (isAIMessage(msg) && msg.usage_metadata) {
+      input += msg.usage_metadata.input_tokens ?? 0;
+      output += msg.usage_metadata.output_tokens ?? 0;
     }
   }
   return { input, output };
 }
 
 /** The text of the last AI message in the final state (the agent's closing summary). */
-function lastAiText(messages: unknown[]): string {
+function lastAiText(messages: BaseMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (messageType(msg) === "ai") {
-      const text = contentToString((msg as any).content).trim();
+    if (msg && isAIMessage(msg)) {
+      const text = contentToString(msg.content).trim();
       if (text) return text;
     }
   }
