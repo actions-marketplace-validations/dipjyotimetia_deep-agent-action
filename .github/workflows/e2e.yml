@@ -80,7 +80,7 @@ jobs:
           printf '%s' "$RESULT_JSON" | EXPECT_STATUS=success bun run scripts/e2e/assert-result.ts
 
       - name: Download audit artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deep-agent-run
           path: ./artifact
