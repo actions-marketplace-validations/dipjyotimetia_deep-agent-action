@@ -50,7 +50,7 @@ export const DEFAULT_DENIED_COMMANDS = [
 
 /**
  * Normalize a model id into a provider-prefixed form.
- * `claude-sonnet-4-5` -> `{ provider: "anthropic", name: "claude-sonnet-4-5", full: "anthropic:claude-sonnet-4-5" }`
+ * `claude-sonnet-4-6` -> `{ provider: "anthropic", name: "claude-sonnet-4-6", full: "anthropic:claude-sonnet-4-6" }`
  * `openai:gpt-5` -> `{ provider: "openai", name: "gpt-5", full: "openai:gpt-5" }`
  */
 /** Bare-model-name prefix → provider inference (when no explicit `provider:` prefix). */

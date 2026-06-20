@@ -8,7 +8,7 @@ Source of truth: [`src/agent/model.ts`](../src/agent/model.ts) and [`src/config.
 
 - **Bare name** → the provider is inferred from the prefix:
   - `claude…` → `anthropic`
-  - `gpt…` / `o1…` / `o3…` → `openai`
+  - `gpt…` / `o\d+…` (e.g. `o1…`, `o3…`) → `openai`
   - `gemini…` → `google`
   - anything else → defaults to `anthropic`
 - **`provider:name`** → the provider is explicit. Required for every provider except the three inferred above.
@@ -26,7 +26,7 @@ model: "openai-compatible:llama-3.1-70b"   # explicit; also set base_url
 
 ```yaml
 with:
-  model: "claude-sonnet-4-6"   # or anthropic:claude-opus-4-5
+  model: "claude-sonnet-4-6"   # or anthropic:claude-sonnet-4-6
 env:
   PROVIDER_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```

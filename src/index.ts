@@ -108,7 +108,7 @@ function budgetFrom(config: Config): BudgetOptions | undefined {
 async function smokeCheck(): Promise<void> {
   const anthropic = createModel({
     provider: "anthropic",
-    model: "claude-sonnet-4-5",
+    model: "claude-sonnet-4-6",
     apiKey: "smoke",
   });
   const openai = createModel({ provider: "openai", model: "gpt-5", apiKey: "smoke" });

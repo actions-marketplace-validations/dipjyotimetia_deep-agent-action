@@ -85,8 +85,6 @@ A malformed value (e.g. `"$5"` or a negative number) fails the run loudly rather
 | `mcp_config` | — | MCP servers JSON (see [mcp-tools.yml](../examples/mcp-tools.yml)). |
 | `comment_debounce_ms` | `8000` | Minimum interval between edits to the sticky progress comment. |
 
-> **Reserved inputs.** `execution_mode`, `langgraph_url`, and `assistant_id` are declared in `action.yml` as placeholders for a planned hosted "bridge" mode. They are **not implemented** — only the default in-runner mode works today. Leave them unset.
-
 ---
 
 ## Environment variables
@@ -136,7 +134,7 @@ Source of truth: [`src/config/repoConfig.ts`](../src/config/repoConfig.ts).
 system_prompt: |
   This is a TypeScript monorepo managed with pnpm. Always co-locate tests with
   the code they cover, and never edit files under generated/.
-model: claude-opus-4-5
+model: claude-sonnet-4-6
 allowed_commands: [git, pnpm, node, pytest]
 denied_commands: [rm]
 ```

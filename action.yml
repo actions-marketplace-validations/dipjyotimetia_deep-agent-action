@@ -112,17 +112,6 @@ runs:
         bun-version: "1.3.14"
         token: ${{ inputs.github_token || github.token }}
 
-    - name: Setup Custom Bun Path
-      if: inputs.path_to_bun_executable != ''
-      shell: bash
-      env:
-        PATH_TO_BUN_EXECUTABLE: ${{ inputs.path_to_bun_executable }}
-      run: |
-        echo "Using custom Bun executable: $PATH_TO_BUN_EXECUTABLE"
-        # Add the directory containing the custom executable to PATH
-        BUN_DIR=$(dirname "$PATH_TO_BUN_EXECUTABLE")
-        echo "$BUN_DIR" >> "$GITHUB_PATH"
-
     - name: Install action dependencies
       shell: bash
       working-directory: ${{ github.action_path }}
