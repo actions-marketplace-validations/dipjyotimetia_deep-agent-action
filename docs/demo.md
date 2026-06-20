@@ -49,8 +49,7 @@ _Tokens: 4,210 in / 980 out (~$0.0012)_
 [View run](https://github.com/dipjyotimetia/deep-agent-action/actions/runs/...)
 ```
 
-> _A recorded GIF of a live run can go here._
-> <!-- ![Deep Agent demo](demo.gif) -->
+> See the agent in action by running the [Demo workflow](#run-it) — the job summary links the PR once it finishes.
 
 ## Machine-readable result
 

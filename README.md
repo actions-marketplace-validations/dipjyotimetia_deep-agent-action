@@ -228,7 +228,7 @@ Commit an optional `.github/deep-agent.yml` to tune the agent for a repository w
 system_prompt: |
   This is a TypeScript monorepo managed with pnpm. Always co-locate tests with
   the code they cover, and never edit files under generated/.
-model: claude-opus-4-5
+model: claude-sonnet-4-6
 allowed_commands: [git, pnpm, node, pytest]
 denied_commands: [rm]
 ```
