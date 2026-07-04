@@ -74,6 +74,13 @@ inputs:
   max_total_tokens:
     description: "Abort the run once cumulative billed tokens (input + output, re-counted each model call as context grows — set generously) reach this many. Partial work lands as a draft for review. Unset = no cap."
     required: false
+  max_runtime_minutes:
+    description: "Abort the agent once it has run this many minutes; partial work lands as a draft for review (like a budget stop). Unset = no cap. (A job-level timeout-minutes still applies but kills the run without landing anything.)"
+    required: false
+  recursion_limit:
+    description: "Max LangGraph super-steps per run. Raise for very long multi-step tasks that abort with a recursion-limit error."
+    required: false
+    default: "150"
   # --- Reserved for future phases (declared so the input surface is intentional) ---
   execution_mode:
     description: "Reserved. Only 'in_runner' is implemented in v1; 'bridge' (hosted Open SWE) is planned (P1)."
@@ -99,6 +106,9 @@ outputs:
   budget_stopped:
     description: "'true' when the run was stopped early by a cost/token budget cap (partial work opened for review)."
     value: ${{ steps.agent.outputs.budget_stopped }}
+  timed_out:
+    description: "'true' when the run was stopped early by max_runtime_minutes (partial work opened for review)."
+    value: ${{ steps.agent.outputs.timed_out }}
   result_json:
     description: "Machine-readable run record (plan, tool calls, files changed, outcome)."
     value: ${{ steps.agent.outputs.result_json }}
@@ -140,6 +150,8 @@ runs:
         INPUT_REQUIRE_PUSH_APPROVAL: ${{ inputs.require_push_approval }}
         INPUT_MAX_COST_USD: ${{ inputs.max_cost_usd }}
         INPUT_MAX_TOTAL_TOKENS: ${{ inputs.max_total_tokens }}
+        INPUT_MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes }}
+        INPUT_RECURSION_LIMIT: ${{ inputs.recursion_limit }}
         INPUT_EXECUTION_MODE: ${{ inputs.execution_mode }}
         INPUT_LANGGRAPH_URL: ${{ inputs.langgraph_url }}
         INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}

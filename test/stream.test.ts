@@ -125,4 +125,57 @@ describe("runAgentStream", () => {
     };
     await expect(runAgentStream(agent, {}, opts)).rejects.toThrow("boom");
   });
+
+  test("timeout: an expired runtime cap aborts and reports stopped='timeout'", async () => {
+    // The fake stream waits for the timer's abort signal, then throws — as a
+    // real cancelled LangGraph run would. No budget is configured, so the
+    // catch must key on the timeout, not the meter.
+    const agent = {
+      stream: async function* (_input: unknown, config: any) {
+        yield { messages: [new AIMessage("partial")] };
+        await new Promise<void>((resolve) => {
+          if (config.signal.aborted) return resolve();
+          config.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new Error("Aborted");
+      },
+    };
+    const result = await runAgentStream(agent, {}, { ...opts, maxRuntimeMs: 10 });
+    expect(result.stopped).toBe("timeout");
+    expect(result.summary).toBe("partial");
+  });
+
+  test("timeout: an unexpired cap leaves the run untouched and real errors propagate", async () => {
+    const ok = {
+      stream: async function* () {
+        yield { messages: [new AIMessage("done")] };
+      },
+    };
+    const result = await runAgentStream(ok, {}, { ...opts, maxRuntimeMs: 60_000 });
+    expect(result.stopped).toBeUndefined();
+    expect(result.summary).toBe("done");
+
+    const failing = {
+      stream: async function* () {
+        yield { messages: [] };
+        throw new Error("boom");
+      },
+    };
+    await expect(runAgentStream(failing, {}, { ...opts, maxRuntimeMs: 60_000 })).rejects.toThrow(
+      "boom",
+    );
+  });
+
+  test("recursionLimit: passed through to the stream config, defaulting to 150", async () => {
+    const seen: number[] = [];
+    const agent = {
+      stream: async function* (_input: unknown, config: any) {
+        seen.push(config.recursionLimit);
+        yield { messages: [] };
+      },
+    };
+    await runAgentStream(agent, {}, opts);
+    await runAgentStream(agent, {}, { ...opts, recursionLimit: 400 });
+    expect(seen).toEqual([150, 400]);
+  });
 });

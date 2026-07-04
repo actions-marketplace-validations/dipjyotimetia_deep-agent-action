@@ -2,11 +2,19 @@ import * as core from "@actions/core";
 import { z } from "zod";
 import type { Octokit } from "./client.js";
 import type { GitHubContext } from "../types.js";
+import { truncateBody } from "./text.js";
+
+const SEVERITIES = ["critical", "warning", "info"] as const;
+export type FindingSeverity = (typeof SEVERITIES)[number];
 
 export interface ReviewFinding {
   path: string;
   line: number;
   body: string;
+  /** Optional rank; absent when the agent didn't (or couldn't validly) rank it. */
+  severity?: FindingSeverity;
+  /** Optional verbatim replacement for the commented line(s), rendered as a GitHub suggestion. */
+  suggestion?: string;
 }
 
 export interface ReviewResult {
@@ -21,14 +29,29 @@ export interface ReviewResult {
  * become empty/zero and are dropped by the caller's filter rather than failing
  * the surrounding array — so one bad element never discards the whole batch.
  */
-const FindingSchema = z.unknown().transform((f) => {
-  const r = (f ?? {}) as { path?: unknown; line?: unknown; body?: unknown };
+const FindingSchema = z.unknown().transform((f): ReviewFinding => {
+  const r = (f ?? {}) as {
+    path?: unknown;
+    line?: unknown;
+    body?: unknown;
+    severity?: unknown;
+    suggestion?: unknown;
+  };
   return {
     path: String(r.path ?? ""),
     line: Number(r.line ?? 0),
     body: String(r.body ?? ""),
+    severity: normalizeSeverity(r.severity),
+    suggestion: typeof r.suggestion === "string" && r.suggestion.trim() ? r.suggestion : undefined,
   };
 });
+
+/** Lenient severity coercion: unknown/malformed values become undefined, never a parse failure. */
+function normalizeSeverity(raw: unknown): FindingSeverity | undefined {
+  if (typeof raw !== "string") return undefined;
+  const s = raw.trim().toLowerCase();
+  return (SEVERITIES as readonly string[]).includes(s) ? (s as FindingSeverity) : undefined;
+}
 
 const ReviewResultSchema = z.object({
   summary: z.string().catch(""),
@@ -63,6 +86,26 @@ export function parseFindings(raw: unknown): ReviewResult {
 }
 
 /**
+ * Render one finding's comment body: bold severity prefix, the comment text,
+ * and — when the agent proposed a concrete fix — a GitHub `suggestion` fence
+ * the reviewer can apply with one click. Pure and testable.
+ */
+export function formatFindingBody(f: ReviewFinding): string {
+  const prefixes: Record<FindingSeverity, string> = {
+    critical: "**[Critical]** ",
+    warning: "**[Warning]** ",
+    info: "**[Info]** ",
+  };
+  let out = `${f.severity ? prefixes[f.severity] : ""}${f.body}`;
+  if (f.suggestion) {
+    // A suggestion containing a triple-backtick fence needs a longer outer fence.
+    const fence = f.suggestion.includes("```") ? "````" : "```";
+    out += `\n\n${fence}suggestion\n${f.suggestion}\n${fence}`;
+  }
+  return out;
+}
+
+/**
  * Post a review with inline comments. If GitHub rejects the inline comments
  * (e.g. a line that isn't part of the diff), fall back to a single review whose
  * body folds the findings in, so feedback is never lost.
@@ -77,7 +120,11 @@ export async function postReview(
   const summary = result.summary || "Deep Agent review.";
 
   if (result.findings.length === 0) {
-    await octokit.rest.pulls.createReview({ ...base, event: "COMMENT", body: summary });
+    await octokit.rest.pulls.createReview({
+      ...base,
+      event: "COMMENT",
+      body: truncateBody(summary),
+    });
     return;
   }
 
@@ -85,12 +132,12 @@ export async function postReview(
     await octokit.rest.pulls.createReview({
       ...base,
       event: "COMMENT",
-      body: summary,
+      body: truncateBody(summary),
       comments: result.findings.map((f) => ({
         path: f.path,
         line: f.line,
         side: "RIGHT",
-        body: f.body,
+        body: truncateBody(formatFindingBody(f)),
       })),
     });
   } catch (err) {
@@ -100,8 +147,12 @@ export async function postReview(
     const folded = [
       summary,
       "",
-      ...result.findings.map((f) => `- \`${f.path}:${f.line}\` — ${f.body}`),
+      ...result.findings.map((f) => `- \`${f.path}:${f.line}\` — ${formatFindingBody(f)}`),
     ].join("\n");
-    await octokit.rest.pulls.createReview({ ...base, event: "COMMENT", body: folded });
+    await octokit.rest.pulls.createReview({
+      ...base,
+      event: "COMMENT",
+      body: truncateBody(folded),
+    });
   }
 }

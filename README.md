@@ -81,6 +81,13 @@ permissions:
   pull-requests: write
   issues: write
 
+# One agent run per issue/PR thread at a time: simultaneous @agent mentions
+# queue instead of racing the sticky tracking comment (and its memory block).
+# cancel-in-progress stays false so an in-flight run finishes and lands its work.
+concurrency:
+  group: deep-agent-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   agent:
     runs-on: ubuntu-latest
@@ -198,6 +205,8 @@ All inputs are optional.
 | `require_push_approval` | Gate landing of changes behind human review (draft PR / proposed branch). | `false` |
 | `max_cost_usd` | Abort the run once estimated spend reaches this many USD; partial work lands as a draft. Requires a known model price — pair with `max_total_tokens` for unpriced models. | — (no cap) |
 | `max_total_tokens` | Abort once cumulative billed tokens (input + output) reach this many; partial work lands as a draft. Re-counted each model call as context grows, so set it generously. | — (no cap) |
+| `max_runtime_minutes` | Abort the agent once it has run this many minutes; partial work lands as a draft (like a budget stop). A job-level `timeout-minutes` still applies but kills the run without landing anything. | — (no cap) |
+| `recursion_limit` | Max LangGraph super-steps per run. Raise for very long multi-step tasks that abort with a recursion-limit error. | `150` |
 
 ¹ Default `allowed_commands`: `git, ls, cat, mkdir, touch, cp, mv, node, npm, npx, pnpm, yarn, bun, python, python3, pip, pytest, go, make, cargo, rustc, sed, grep, find, echo`. Always-on deny-list: `curl, wget, nc, ncat, ssh, scp, sudo, su, telnet, dd, mkfs, shutdown, reboot`. See [docs/configuration.md](docs/configuration.md).
 
@@ -215,6 +224,7 @@ All inputs are optional.
 | `pr_url` | URL of the opened pull request (or compare link), if any. |
 | `branch` | Branch the agent pushed to, if any. |
 | `budget_stopped` | `true` when a cost/token cap stopped the run early (partial work opened for review). |
+| `timed_out` | `true` when `max_runtime_minutes` stopped the run early (partial work opened for review). |
 | `result_json` | Machine-readable run record (plan, files changed, tokens, cost, outcome). |
 
 Every run also writes a job summary and uploads a `deep-agent-run` artifact (`deep-agent-run.json`) as an audit record.
@@ -285,7 +295,7 @@ For reproducible builds, pin to a commit SHA:
 
 ## Contributing
 
-Contributions are welcome. The action is TypeScript run directly on [Bun](https://bun.sh) — no build/bundle step. See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev loop, project layout, and how to add a provider.
+Contributions are welcome. The action is TypeScript run directly on [Bun](https://bun.sh) — no build/bundle step. See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev loop, project layout, and how to add a provider. For an audit of the feature surface — strengths, recently closed gaps, and the roadmap — see [docs/feature-review.md](docs/feature-review.md).
 
 ## License
 

@@ -13,8 +13,8 @@ export interface StreamResult {
   todos: TodoItem[];
   summary: string;
   tokens: TokenUsage;
-  /** Set when the run was aborted early by a budget ceiling. */
-  stopped?: "budget";
+  /** Set when the run was aborted early by a budget ceiling or the runtime cap. */
+  stopped?: "budget" | "timeout";
 }
 
 /** Budget ceiling for a run, plus the model used to price tokens. */
@@ -73,6 +73,10 @@ export async function runAgentStream(
     debounceMs: number;
     /** When set, meter token spend and abort the run if a ceiling is crossed. */
     budget?: BudgetOptions;
+    /** When set, abort the run once it has been streaming this long. */
+    maxRuntimeMs?: number;
+    /** Max LangGraph super-steps per run (default 150). */
+    recursionLimit?: number;
   },
 ): Promise<StreamResult> {
   let todos: TodoItem[] = [];
@@ -81,27 +85,37 @@ export async function runAgentStream(
   let lastMirrorKey = "";
   let lastMirrorAt = 0;
 
-  // A budget cap is enforced by a callback meter (which sees subagent calls too)
-  // plus an AbortController whose signal propagates into subagent invokes. The
-  // two are created together, so they're defined in lockstep.
-  let controller: AbortController | undefined;
-  let meter: BudgetMeter | undefined;
-  if (options.budget) {
-    controller = new AbortController();
-    meter = new BudgetMeter(options.budget.model, options.budget, controller);
-  }
-
-  const stream = await agent.stream(input, {
-    configurable: { thread_id: options.threadId },
-    streamMode: "values",
-    subgraphs: true,
-    // A coding loop (read → edit → test → fix) easily exceeds LangGraph's
-    // default of 25 super-steps; raise it so real tasks don't abort mid-run.
-    recursionLimit: 150,
-    ...(meter && controller ? { callbacks: [meter], signal: controller.signal } : {}),
-  });
+  // A budget cap is enforced by a callback meter (which sees subagent calls too);
+  // a runtime cap by a timer. Both abort through the same controller, whose
+  // signal propagates into subagent invokes.
+  const needsAbort = options.budget != null || options.maxRuntimeMs != null;
+  const controller = needsAbort ? new AbortController() : undefined;
+  const meter =
+    options.budget && controller
+      ? new BudgetMeter(options.budget.model, options.budget, controller)
+      : undefined;
+  let timedOut = false;
+  const timer =
+    options.maxRuntimeMs != null && controller
+      ? setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, options.maxRuntimeMs)
+      : undefined;
 
   try {
+    const stream = await agent.stream(input, {
+      configurable: { thread_id: options.threadId },
+      streamMode: "values",
+      subgraphs: true,
+      // A coding loop (read → edit → test → fix) easily exceeds LangGraph's
+      // default of 25 super-steps; default well above it so real tasks don't
+      // abort mid-run.
+      recursionLimit: options.recursionLimit ?? 150,
+      ...(controller ? { signal: controller.signal } : {}),
+      ...(meter ? { callbacks: [meter] } : {}),
+    });
+
     for await (const item of stream) {
       const { namespace, state } = extractState(item);
       if (!state || typeof state !== "object") continue;
@@ -125,10 +139,14 @@ export async function runAgentStream(
       }
     }
   } catch (err) {
-    // If the meter deliberately aborted, whatever cancellation error the stream
-    // produced is a clean early stop, not a failure — swallow it regardless of
-    // its shape. Any other error propagates.
-    if (!meter?.stopped) throw err;
+    // If the meter or the runtime timer deliberately aborted, whatever
+    // cancellation error the stream produced is a clean early stop, not a
+    // failure — swallow it regardless of its shape. Any other error propagates.
+    if (!meter?.stopped && !timedOut) throw err;
+  } finally {
+    // Without this a pending timer keeps the process alive past the run (or
+    // fires an abort after a successful completion).
+    if (timer) clearTimeout(timer);
   }
 
   // Final mirror so the closing plan state is always reflected.
@@ -146,7 +164,12 @@ export async function runAgentStream(
         output: Math.max(meter.total.output, summed.output),
       }
     : summed;
-  return { todos, summary: lastAiText(finalMessages), tokens, stopped: meter?.stopped };
+  return {
+    todos,
+    summary: lastAiText(finalMessages),
+    tokens,
+    stopped: meter?.stopped ?? (timedOut ? "timeout" : undefined),
+  };
 }
 
 /** Sum input/output tokens across all AI messages in the final state. */

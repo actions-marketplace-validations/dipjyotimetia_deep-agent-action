@@ -26,6 +26,12 @@ permissions:
   pull-requests: write
   issues: write
 
+# One agent run per issue/PR thread at a time: simultaneous mentions queue
+# instead of racing the sticky tracking comment (and its memory block).
+concurrency:
+  group: deep-agent-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   agent:
     runs-on: ubuntu-latest

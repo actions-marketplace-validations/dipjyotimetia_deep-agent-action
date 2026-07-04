@@ -68,6 +68,24 @@ If `require_push_approval: true`, that's intended: in PR mode the agent pushes a
 
 Use `actions/checkout` with `fetch-depth: 0` so the agent has full history to branch, diff, and push from.
 
+## Duplicate or mangled tracking comments / a push failed with "non-fast-forward"
+
+Two `@agent` mentions on the same thread can start two runs that race each other: both edit the same sticky tracking comment (last write wins, including its hidden memory block), and a push can be rejected as non-fast-forward when the branch moved mid-run. Serialize runs per thread with a workflow-level concurrency group:
+
+```yaml
+concurrency:
+  group: deep-agent-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false # let the in-flight run finish and land its work
+```
+
+## A run aborted with a recursion-limit error
+
+Very long multi-step tasks can exceed the LangGraph super-step ceiling (default `150`). Raise the `recursion_limit` input — and consider `max_runtime_minutes` / the budget caps so a runaway task still stops gracefully.
+
+## The run was stopped early ("max runtime" / "budget cap" banner)
+
+That's `max_runtime_minutes` or `max_cost_usd` / `max_total_tokens` doing their job: the agent was aborted gracefully and any partial work landed through the approval path (draft PR / proposed branch) for review. The `timed_out` / `budget_stopped` outputs are set to `true`. Raise the cap if the task genuinely needs more.
+
 ## Still stuck?
 
 Open an issue with the run URL, the `status` output, and the relevant log excerpt. The `deep-agent-run` artifact attached to the run contains the full machine-readable record.

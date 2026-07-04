@@ -67,6 +67,11 @@ describe("renderTrackingBody", () => {
     expect(body).toContain("budget cap");
   });
 
+  test("shows a runtime banner when stopped at the max runtime", () => {
+    const body = renderTrackingBody({ status: "success", timedOut: true });
+    expect(body).toContain("max runtime");
+  });
+
   test("embeds the hidden memory block when memory is present", () => {
     const body = renderTrackingBody({
       status: "success",

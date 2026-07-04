@@ -71,6 +71,10 @@ export interface Config {
   maxCostUsd?: number;
   /** Abort the run once cumulative billed tokens (input + output) reach this many. */
   maxTotalTokens?: number;
+  /** Abort the agent once it has run this many minutes; partial work lands for review. */
+  maxRuntimeMinutes?: number;
+  /** Max LangGraph super-steps per run (defaults to 150). */
+  recursionLimit: number;
 }
 
 /** Token usage for a run. */
@@ -109,4 +113,6 @@ export interface RunRecord {
   approvalPending?: boolean;
   /** True when the run was stopped early by a cost/token budget ceiling. */
   budgetStopped?: boolean;
+  /** True when the run was stopped early by the max_runtime_minutes cap. */
+  timedOut?: boolean;
 }

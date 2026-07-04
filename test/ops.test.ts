@@ -39,4 +39,18 @@ describe("explainGitHubError", () => {
       "Validation failed: head sha can't be blank",
     );
   });
+
+  test("adds a hint for protected-branch rejections", () => {
+    const out = explainGitHubError(
+      "git push failed: remote: error: GH006: Protected branch update failed for refs/heads/main.",
+    );
+    expect(out).toContain("protection rules");
+    expect(out).toContain("require_push_approval");
+  });
+
+  test("adds a hint for non-fast-forward pushes", () => {
+    const out = explainGitHubError("git push failed: ! [rejected] main -> main (non-fast-forward)");
+    expect(out).toContain("branch moved");
+    expect(out).toContain("concurrency");
+  });
 });

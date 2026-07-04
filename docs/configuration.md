@@ -67,14 +67,15 @@ The deny-list always wins: a command on both lists is blocked. See [security.md]
 
 > **Letting `GITHUB_TOKEN` open PRs.** With the default token you must enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"**, or the run fails with _"GitHub Actions is not permitted to create or approve pull requests"_. A GitHub App identity avoids this. See [troubleshooting](troubleshooting.md#github-actions-is-not-permitted-to-create-or-approve-pull-requests).
 
-### Cost controls
+### Cost & runtime controls
 
-Both are unset by default (no cap). A cap is metered across **every** model call — the main agent and its subagents — and aborts the run the instant a ceiling is crossed; the partial work then lands through the approval path (a draft PR / proposed branch) for review, and the `budget_stopped` output is set to `true`.
+All are unset by default (no cap). A cap is metered across **every** model call — the main agent and its subagents — and aborts the run the instant a ceiling is crossed; the partial work then lands through the approval path (a draft PR / proposed branch) for review, and the matching output (`budget_stopped` or `timed_out`) is set to `true`.
 
 | Input | Default | Notes |
 |---|---|---|
 | `max_cost_usd` | — | Abort once estimated spend reaches this many USD. **Requires a known model price** (see [`src/agent/cost.ts`](../src/agent/cost.ts)); on an unpriced model it never fires, so pair it with `max_total_tokens`. |
 | `max_total_tokens` | — | Abort once cumulative billed tokens (input + output) reach this many. The count is **re-evaluated on each model call as the context grows**, not a running sum of fresh tokens — set it generously. |
+| `max_runtime_minutes` | — | Abort the agent once it has been running this many minutes. Unlike GitHub's job-level `timeout-minutes` — which kills the job and loses everything — this stops the agent gracefully and lands the partial work as a draft for review. Use both: this cap somewhat below the job timeout. |
 
 A malformed value (e.g. `"$5"` or a negative number) fails the run loudly rather than silently disabling the cap — a budget control has no safe default.
 
@@ -84,6 +85,7 @@ A malformed value (e.g. `"$5"` or a negative number) fails the run loudly rather
 |---|---|---|
 | `mcp_config` | — | MCP servers JSON (see [mcp-tools.yml](../examples/mcp-tools.yml)). |
 | `comment_debounce_ms` | `8000` | Minimum interval between edits to the sticky progress comment. |
+| `recursion_limit` | `150` | Max LangGraph super-steps per run. A long read → edit → test → fix loop can exceed the default; raise it if a run aborts with a recursion-limit error. |
 
 ---
 

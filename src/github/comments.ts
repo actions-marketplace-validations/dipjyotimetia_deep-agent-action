@@ -2,6 +2,7 @@ import type { Octokit } from "./client.js";
 import type { GitHubContext, RunStatus, TokenUsage } from "../types.js";
 import type { TodoItem } from "../agent/stream.js";
 import { renderMemoryBlock, type MemoryTurn } from "./memory.js";
+import { truncateBody } from "./text.js";
 
 const HEADER = "### 🤖 Deep Agent";
 /** Hidden marker used to find this run's sticky tracking comment on re-runs. */
@@ -28,6 +29,8 @@ export interface TrackingState {
   approvalPending?: boolean;
   /** When true, the run was stopped early by a budget ceiling; show a banner. */
   budgetStopped?: boolean;
+  /** When true, the run was stopped early by the runtime cap; show a banner. */
+  timedOut?: boolean;
   /** Per-thread turn history, stored as a hidden block for the next run to read. */
   memory?: MemoryTurn[];
 }
@@ -81,6 +84,12 @@ export function renderTrackingBody(state: TrackingState): string {
     lines.push(
       "",
       "⚠️ Stopped at the configured budget cap — any partial changes were opened for review.",
+    );
+  }
+  if (state.timedOut) {
+    lines.push(
+      "",
+      "⚠️ Stopped at the configured max runtime — any partial changes were opened for review.",
     );
   }
   if (state.tokens && (state.tokens.input || state.tokens.output)) {
@@ -149,7 +158,7 @@ export async function createTrackingComment(
     owner: ctx.owner,
     repo: ctx.repo,
     issue_number: ctx.entityNumber,
-    body,
+    body: truncateBody(body),
   });
   return res.data.id;
 }
@@ -165,6 +174,6 @@ export async function updateTrackingComment(
     owner: ctx.owner,
     repo: ctx.repo,
     comment_id: commentId,
-    body,
+    body: truncateBody(body),
   });
 }

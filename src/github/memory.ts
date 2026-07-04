@@ -43,6 +43,20 @@ export function parseMemory(body: string | undefined): MemoryTurn[] {
   }
 }
 
+/**
+ * Split a memory block off a comment body: `{ rest, block? }`. Used by body
+ * truncation to cut visible text without ever slicing through the block.
+ */
+export function extractMemoryBlock(body: string): { rest: string; block?: string } {
+  const match = body.match(BLOCK_RE);
+  if (match?.index == null) return { rest: body };
+  const rest = (body.slice(0, match.index) + body.slice(match.index + match[0].length)).replace(
+    /\n+$/,
+    "",
+  );
+  return { rest, block: match[0] };
+}
+
 /** Render the hidden block that stores the turn history in the sticky comment. */
 export function renderMemoryBlock(turns: MemoryTurn[]): string {
   const b64 = Buffer.from(JSON.stringify(turns), "utf8").toString("base64");

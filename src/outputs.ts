@@ -10,6 +10,7 @@ export async function emitOutputs(record: RunRecord): Promise<void> {
   core.setOutput("pr_url", record.prUrl ?? "");
   core.setOutput("branch", record.branch ?? "");
   core.setOutput("budget_stopped", record.budgetStopped ? "true" : "false");
+  core.setOutput("timed_out", record.timedOut ? "true" : "false");
   core.setOutput("result_json", JSON.stringify(record));
 
   await writeSummary(record);
@@ -41,6 +42,12 @@ async function writeSummary(record: RunRecord): Promise<void> {
     if (record.budgetStopped) {
       s.addRaw(
         "**Budget:** stopped early at the configured cap; partial work opened for review.\n",
+        true,
+      );
+    }
+    if (record.timedOut) {
+      s.addRaw(
+        "**Runtime:** stopped early at the configured max runtime; partial work opened for review.\n",
         true,
       );
     }

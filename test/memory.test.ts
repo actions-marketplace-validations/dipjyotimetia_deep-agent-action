@@ -4,6 +4,7 @@ import {
   renderMemoryBlock,
   appendTurn,
   buildMemoryContext,
+  extractMemoryBlock,
   type MemoryTurn,
 } from "../src/github/memory.js";
 
@@ -49,6 +50,19 @@ describe("parseMemory is defensive", () => {
     expect(parseMemory(`<!-- deep-agent:memory:${mixed} -->`)).toEqual([
       { instruction: "ok", summary: "fine", prUrl: undefined },
     ]);
+  });
+});
+
+describe("extractMemoryBlock", () => {
+  test("splits a trailing block off the body", () => {
+    const block = renderMemoryBlock(turns);
+    const { rest, block: extracted } = extractMemoryBlock(`visible text\n\n${block}`);
+    expect(rest).toBe("visible text");
+    expect(extracted).toBe(block);
+  });
+
+  test("returns the body unchanged when no block is present", () => {
+    expect(extractMemoryBlock("just a comment")).toEqual({ rest: "just a comment" });
   });
 });
 

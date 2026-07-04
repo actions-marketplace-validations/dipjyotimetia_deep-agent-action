@@ -98,6 +98,19 @@ export function parsePositiveNumber(raw: string | undefined, name: string): numb
   return n;
 }
 
+/**
+ * Parse an optional positive-integer input. Undefined when unset; throws on a
+ * malformed or fractional value (same loud-failure semantics as
+ * `parsePositiveNumber`).
+ */
+export function parsePositiveInteger(raw: string | undefined, name: string): number | undefined {
+  const n = parsePositiveNumber(raw, name);
+  if (n != null && !Number.isInteger(n)) {
+    throw new Error(`${name} must be a positive integer; got "${raw}".`);
+  }
+  return n;
+}
+
 /** Parse a comma/newline-separated list into a trimmed, de-duplicated array. */
 export function parseList(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -140,6 +153,12 @@ export function loadConfig(): Config {
     commentDebounceMs: Number(core.getInput("comment_debounce_ms")) || 8000,
     maxCostUsd: parsePositiveNumber(core.getInput("max_cost_usd"), "max_cost_usd"),
     maxTotalTokens: parsePositiveNumber(core.getInput("max_total_tokens"), "max_total_tokens"),
+    maxRuntimeMinutes: parsePositiveNumber(
+      core.getInput("max_runtime_minutes"),
+      "max_runtime_minutes",
+    ),
+    recursionLimit:
+      parsePositiveInteger(core.getInput("recursion_limit"), "recursion_limit") ?? 150,
   };
 }
 
