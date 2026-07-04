@@ -1,0 +1,41 @@
+# Automate issue requests into PRs.
+# Copy into .github/workflows/ in the target repository.
+#
+# When an issue body or issue comment contains `@agent`, the action treats it
+# as a request and can open a PR with the requested change.
+name: Deep Agent (issue automation)
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened, edited, assigned, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: deep-agent-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dipjyotimetia/deep-agent-action@main
+        with:
+          model: "claude-sonnet-4-6"
+          trigger_phrase: "@agent"
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+
+# Example usage:
+#   - Open an issue with a body like "@agent implement login validation and tests"
+#   - Or comment on an existing issue: "@agent fix the validation flow"
+# The agent will create a PR with the requested change.

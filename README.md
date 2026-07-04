@@ -207,6 +207,12 @@ All inputs are optional.
 | `max_total_tokens` | Abort once cumulative billed tokens (input + output) reach this many; partial work lands as a draft. Re-counted each model call as context grows, so set it generously. | — (no cap) |
 | `max_runtime_minutes` | Abort the agent once it has run this many minutes; partial work lands as a draft (like a budget stop). A job-level `timeout-minutes` still applies but kills the run without landing anything. | — (no cap) |
 | `recursion_limit` | Max LangGraph super-steps per run. Raise for very long multi-step tasks that abort with a recursion-limit error. | `150` |
+| `execution_mode` | Reserved for future hosted/bridge execution. Only `in_runner` is implemented today. | `in_runner` |
+| `langgraph_url` | Reserved for future bridge mode. Ignored in the current action. | — |
+| `assistant_id` | Reserved for future bridge mode. Ignored in the current action. | — |
+
+> [!NOTE]
+> `execution_mode`, `langgraph_url`, and `assistant_id` are accepted by the action for future compatibility, but only the in-runner mode is implemented in this release.
 
 ¹ Default `allowed_commands`: `git, ls, cat, mkdir, touch, cp, mv, node, npm, npx, pnpm, yarn, bun, python, python3, pip, pytest, go, make, cargo, rustc, sed, grep, find, echo`. Always-on deny-list: `curl, wget, nc, ncat, ssh, scp, sudo, su, telnet, dd, mkfs, shutdown, reboot`. See [docs/configuration.md](docs/configuration.md).
 

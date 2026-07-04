@@ -1,0 +1,44 @@
+# Run the agent on fork PRs only after a maintainer approves it.
+# Copy into .github/workflows/ in the target repository.
+#
+# This workflow is useful when you want to allow trusted fork contributions to
+# be processed by the agent without exposing secrets to arbitrary forks.
+# A maintainer applies the configured label to a fork PR, and then the agent
+# is allowed to run on that PR.
+name: Deep Agent (fork PR support)
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request:
+    types: [opened, reopened, ready_for_review, edited]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: deep-agent-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dipjyotimetia/deep-agent-action@main
+        with:
+          model: "claude-sonnet-4-6"
+          trigger_phrase: "@agent"
+          fork_allow_label: "agent-approved"
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+
+# On a fork PR, a maintainer must add the `agent-approved` label for the agent
+# to run. If the label is missing, the run is refused to protect repository secrets.

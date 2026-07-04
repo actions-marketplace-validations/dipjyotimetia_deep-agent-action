@@ -1,8 +1,9 @@
 # Using a non-default model provider.
 # Copy into .github/workflows/ and keep ONE of the steps below.
 #
-# A bare model name infers the provider (claude… / gpt… / gemini…); otherwise
-# prefix it with "provider:". See docs/providers.md for full details.
+# A bare model name infers the provider (claude… / gpt… / gemini…). Otherwise
+# prefix it with the provider name, for example openai:, google:, openrouter:,
+# openai-compatible:, bedrock:, or vertexai:. See docs/providers.md for full details.
 name: Deep Agent (multi-provider)
 
 on:
