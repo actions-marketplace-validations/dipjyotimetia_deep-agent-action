@@ -45,7 +45,11 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 - 🤖 **In-runner agent** — plans, reads and edits files, runs your toolchain, commits, and opens a PR. No external service.
 - 💬 **`@agent` triggers** — works from issue comments, PR comments, PR review comments, new issues, and new PRs. Manual runs via `workflow_dispatch` too.
 - 🔌 **8 model providers** — Anthropic, OpenAI, Azure, Google Gemini, OpenRouter, OpenAI-compatible (Groq, xAI, DeepSeek, Together, Ollama, vLLM, …), AWS Bedrock, GCP Vertex AI.
-- 🔍 **Code review mode** — `@agent review` reads the PR diff and posts inline review comments.
+- 🔍 **Code review mode** — `@agent review` reads the PR diff and posts inline review comments. `@agent review and fix` (or `apply_suggestions: true`) also applies clean single-line suggestions directly and lands them as a commit.
+- 🏷️ **Label/assignee triggers** — `auto_run_label` / `auto_run_assignee` run the agent without a trigger-phrase match; combine with `on: schedule` + `prompt` for unattended maintenance runs (see [`examples/scheduled-maintenance.yml`](examples/scheduled-maintenance.yml)).
+- 🔁 **Issue/PR continuity** — a follow-up mention on the same issue reuses the same branch and PR instead of opening a new one each time. A plain `@agent continue` (or `resume`) picks up an incomplete plan where it left off.
+- ✅ **Verified commits** — optional `verified_commits: true` lands changes via the GitHub App's `createCommitOnBranch` mutation so they show as "Verified".
+- 🧭 **Model-aware triage** (opt-in) — `enable_triage: true` classifies a new issue with no trigger phrase and opens a PR, requests a review, asks for clarification, or adds labels. Only ever acts on issues from authors who'd already pass the authorization check for a manual mention, and always lands behind the approval gate.
 - ✋ **Human-in-the-loop gate** — optionally require approval before changes land (draft PR or proposed branch + compare link).
 - 📌 **Sticky progress comment** — one comment, updated in place, with a live checklist, summary, PR link, and token/cost estimate.
 - 💰 **Cost reporting** — token usage and an estimated USD cost surfaced in the comment, job summary, and machine-readable output.
@@ -196,6 +200,9 @@ All inputs are optional.
 | `allowed_commands` | Comma/newline-separated allow-list of shell commands. | a common dev toolchain¹ |
 | `denied_commands` | Extra command names to block (merged with the built-in deny-list). | — |
 | `fork_allow_label` | Label a write-access user applies to authorize the agent on a fork PR. If unset, fork PRs never run. | — |
+| `auto_run_label` | Label that, when applied to an issue, runs the agent without a trigger-phrase match. | — |
+| `auto_run_assignee` | GitHub username that, when assigned to an issue, runs the agent without a trigger-phrase match. | — |
+| `auto_run_default_instruction` | Fallback instruction for an auto-run event when the issue has no usable title/body text. | — |
 | `shell_timeout_seconds` | Max seconds for a single shell command. | `600` |
 | `comment_debounce_ms` | Minimum interval between tracking-comment progress edits. | `8000` |
 | `provider_api_key` | Model provider API key. Also read from `PROVIDER_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` / `OPENROUTER_API_KEY`. | — |
@@ -203,6 +210,11 @@ All inputs are optional.
 | `app_private_key` | GitHub App private key (PEM). Also read from `APP_PRIVATE_KEY`. | — |
 | `github_token` | Token for GitHub API/git operations. | `${{ github.token }}` |
 | `require_push_approval` | Gate landing of changes behind human review (draft PR / proposed branch). | `false` |
+| `verified_commits` | Land via the GitHub App's `createCommitOnBranch` GraphQL mutation so commits show as "Verified". Requires `app_id`/`app_private_key`. | `false` |
+| `apply_suggestions` | Make every review run also apply its own single-line suggestions and land them as a commit. | `false` |
+| `enable_triage` | Classify a new issue with no trigger phrase (open a PR, request a review, ask for clarification, add labels, or do nothing). | `false` |
+| `triage_allowed_labels` | Labels the triage classifier may apply. Anything outside this list is ignored. | — |
+| `triage_model` | Model used for the triage classification call. | `model` |
 | `max_cost_usd` | Abort the run once estimated spend reaches this many USD; partial work lands as a draft. Requires a known model price — pair with `max_total_tokens` for unpriced models. | — (no cap) |
 | `max_total_tokens` | Abort once cumulative billed tokens (input + output) reach this many; partial work lands as a draft. Re-counted each model call as context grows, so set it generously. | — (no cap) |
 | `max_runtime_minutes` | Abort the agent once it has run this many minutes; partial work lands as a draft (like a budget stop). A job-level `timeout-minutes` still applies but kills the run without landing anything. | — (no cap) |
@@ -275,6 +287,8 @@ Ready-to-copy workflows live in [`examples/`](examples/):
 | [`multi-provider.yml`](examples/multi-provider.yml) | OpenAI, Bedrock, Vertex, OpenRouter, and OpenAI-compatible variants. |
 | [`mcp-tools.yml`](examples/mcp-tools.yml) | Extend the agent with MCP servers. |
 | [`github-app.yml`](examples/github-app.yml) | Use a GitHub App so the agent's PRs trigger your CI. |
+| [`issue-automation.yml`](examples/issue-automation.yml) | Turn issue comments/labels into PRs. |
+| [`scheduled-maintenance.yml`](examples/scheduled-maintenance.yml) | Unattended `schedule`-triggered runs (e.g. dependency upgrades). |
 
 ## Troubleshooting
 

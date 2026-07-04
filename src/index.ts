@@ -6,7 +6,13 @@ import { join } from "node:path";
 import { loadConfig, mergeRepoConfig, normalizeModel, resolveProviderApiKey } from "./config.js";
 import { loadRepoConfig, type RepoConfig } from "./config/repoConfig.js";
 import { parseContext } from "./github/context.js";
-import { detectMode, isReviewRequest } from "./modes/detector.js";
+import {
+  detectMode,
+  isReviewRequest,
+  isReviewAndFixRequest,
+  isResumeRequest,
+} from "./modes/detector.js";
+import { runTriageCheck, type TriageHandoff } from "./modes/triage.js";
 import { resolveToken } from "./github/auth.js";
 import { makeOctokit, githubServerUrl, type Octokit } from "./github/client.js";
 import { forkRunAllowed } from "./github/fork.js";
@@ -33,8 +39,23 @@ import {
 import { runAgentStream, type TodoItem, type BudgetOptions } from "./agent/stream.js";
 import { loadMcpTools } from "./agent/mcp.js";
 import { estimateCostUsd } from "./agent/cost.js";
-import { checkoutPrHead, landChanges, resolveBotIdentity } from "./github/ops.js";
-import { fetchPrFiles, parseFindings, postReview, REVIEW_FINDINGS_FILE } from "./github/review.js";
+import {
+  checkoutPrHead,
+  checkoutIssueBranchIfExists,
+  generateBranchName,
+  getCurrentBranch,
+  landChanges,
+  resolveBotIdentity,
+  type LandResult,
+} from "./github/ops.js";
+import { landChangesVerified } from "./github/graphqlCommit.js";
+import {
+  applyReviewSuggestions,
+  fetchPrFiles,
+  parseFindings,
+  postReview,
+  REVIEW_FINDINGS_FILE,
+} from "./github/review.js";
 import { emitOutputs } from "./outputs.js";
 import type { Config, GitHubContext, Mode, RunRecord, TokenUsage } from "./types.js";
 
@@ -153,7 +174,7 @@ async function run(): Promise<void> {
 
   // Merge per-repo config (committed `.github/deep-agent.yml`) over action inputs.
   const repoConfig = loadRepoConfig(rootDir);
-  const config = mergeRepoConfig(loadConfig(), repoConfig);
+  let config = mergeRepoConfig(loadConfig(), repoConfig);
 
   const record: RunRecord = {
     status: "skipped",
@@ -165,15 +186,53 @@ async function run(): Promise<void> {
   };
 
   // P0-1: route the event.
-  if (detectMode(ctx, { triggerPhrase: config.triggerPhrase, prompt: config.prompt }) === "noop") {
+  const modeDetected = detectMode(ctx, {
+    triggerPhrase: config.triggerPhrase,
+    prompt: config.prompt,
+    autoRunLabel: config.autoRunLabel,
+    autoRunAssignee: config.autoRunAssignee,
+  });
+  // A new issue with no trigger phrase is otherwise a silent no-op; when
+  // enabled, triage gets one shot at classifying it (open a PR, request a
+  // review, ask for clarification, add labels) before we give up on it.
+  // Explicit triggers (trigger phrase, auto_run_label/assignee) always win —
+  // triage only ever runs when nothing else already matched.
+  let triageHandoff: TriageHandoff | undefined;
+  if (
+    modeDetected === "noop" &&
+    config.enableTriage &&
+    ctx.eventName === "issues" &&
+    ctx.eventAction === "opened"
+  ) {
+    triageHandoff = await runTriageCheck({ ctx, config });
+  }
+
+  if (modeDetected === "noop" && !triageHandoff) {
     core.info("No trigger phrase / prompt for this event; exiting with no side effects.");
     await emitOutputs(record);
     return;
   }
 
+  // A triage-originated run always lands behind the approval gate (draft PR /
+  // proposed branch) regardless of the repo's require_push_approval setting —
+  // a misclassification should never push/merge unsupervised.
+  if (triageHandoff) config = { ...config, requirePushApproval: true };
+
+  // An auto-run label/assignee bypasses the trigger phrase, so the issue may have
+  // no phrase to extract an instruction after — fall back to the whole triggerText
+  // (already extracted by extractInstruction when the phrase is absent), and if
+  // that's still empty, a configurable default instruction.
+  const isAutoRun =
+    ctx.eventName === "issues" &&
+    ((config.autoRunLabel && ctx.eventLabel === config.autoRunLabel) ||
+      (config.autoRunAssignee && ctx.eventAssignee === config.autoRunAssignee));
+
   // P0-2: resolve the instruction.
   const instruction =
-    config.prompt?.trim() || extractInstruction(ctx.triggerText, config.triggerPhrase);
+    triageHandoff?.instruction ||
+    config.prompt?.trim() ||
+    extractInstruction(ctx.triggerText, config.triggerPhrase) ||
+    (isAutoRun ? (config.autoRunDefaultInstruction ?? "") : "");
   record.instruction = instruction;
   if (!instruction) {
     core.info("Trigger matched but no instruction text was provided; exiting.");
@@ -181,18 +240,29 @@ async function run(): Promise<void> {
     return;
   }
 
-  // Refine to review mode when a PR mention asks for a review.
-  const mode: Mode = ctx.isPR && isReviewRequest(instruction) ? "review" : "agent";
+  // Refine to review mode when a PR mention asks for a review (or triage
+  // decided this issue is actually a PR asking for one). "review and fix"
+  // (or the apply_suggestions config) additionally applies the review's own
+  // single-line suggestions and lands them as a commit.
+  const mode: Mode =
+    triageHandoff?.mode === "review" || (ctx.isPR && isReviewRequest(instruction))
+      ? "review"
+      : "agent";
   record.mode = mode;
+  const applyFixes =
+    mode === "review" && (isReviewAndFixRequest(instruction) || config.applySuggestions);
 
-  // P0-12: mint a scoped, short-lived token.
-  const tokenResult = await resolveToken({
-    owner: ctx.owner,
-    repo: ctx.repo,
-    appId: core.getInput("app_id") || process.env.APP_ID,
-    privateKey: core.getInput("app_private_key") || process.env.APP_PRIVATE_KEY,
-    githubToken: core.getInput("github_token") || process.env.GITHUB_TOKEN,
-  });
+  // P0-12: mint a scoped, short-lived token — reuse triage's if it already
+  // minted one (it already ran the same auth checks below for this actor).
+  const tokenResult =
+    triageHandoff?.tokenResult ??
+    (await resolveToken({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      appId: core.getInput("app_id") || process.env.APP_ID,
+      privateKey: core.getInput("app_private_key") || process.env.APP_PRIVATE_KEY,
+      githubToken: core.getInput("github_token") || process.env.GITHUB_TOKEN,
+    }));
   const octokit = makeOctokit(tokenResult.token);
 
   await resolvePrRefs(octokit, ctx);
@@ -204,35 +274,42 @@ async function run(): Promise<void> {
     return;
   }
 
-  // P0-3: authorization — independent checks run together. Ignore bots silently.
-  const [human, perm] = await Promise.all([
-    checkActorIsHuman(octokit, ctx.actor),
-    checkActorPermission(octokit, {
-      owner: ctx.owner,
-      repo: ctx.repo,
-      username: ctx.actor,
-      allowed: config.allowedPermissions,
-    }),
-  ]);
-  if (!human.ok) {
-    core.info(`Ignoring non-human actor: ${human.reason}`);
-    record.status = "refused";
-    await emitOutputs(record);
-    return;
-  }
-  if (!perm.ok) {
-    await refuse(octokit, ctx, record, perm.reason!);
-    return;
+  // P0-3: authorization — independent checks run together. Ignore bots
+  // silently. Skipped for a triage handoff: runTriageCheck already verified
+  // this exact actor/repo pass the same checks moments ago.
+  if (!triageHandoff) {
+    const [human, perm] = await Promise.all([
+      checkActorIsHuman(octokit, ctx.actor),
+      checkActorPermission(octokit, {
+        owner: ctx.owner,
+        repo: ctx.repo,
+        username: ctx.actor,
+        allowed: config.allowedPermissions,
+      }),
+    ]);
+    if (!human.ok) {
+      core.info(`Ignoring non-human actor: ${human.reason}`);
+      record.status = "refused";
+      await emitOutputs(record);
+      return;
+    }
+    if (!perm.ok) {
+      await refuse(octokit, ctx, record, perm.reason!);
+      return;
+    }
   }
 
   const url = runUrl(ctx);
+  const branchSuffix = process.env.GITHUB_RUN_ID || "run";
 
   // P0-5 + M2: acknowledge, find the existing tracking comment, and load any MCP
   // tools — all independent, so run them together. We find (not yet upsert) the
-  // comment first so prior thread memory is read before we overwrite it.
+  // comment first so prior thread memory is read before we overwrite it. A
+  // triage handoff is guaranteed to have none yet (runTriageCheck only hands
+  // off when its own lookup found none), so skip re-fetching it.
   const [, existingComment, mcp] = await Promise.all([
     addEyesReaction(octokit, ctx),
-    findTrackingComment(octokit, ctx),
+    triageHandoff ? Promise.resolve(undefined) : findTrackingComment(octokit, ctx),
     loadMcpTools(config.mcpConfig),
   ]);
 
@@ -263,6 +340,9 @@ async function run(): Promise<void> {
         ctx,
         rootDir,
         token: tokenResult.token,
+        tokenSource: tokenResult.source,
+        appSlug: tokenResult.appSlug,
+        applyFixes,
         model,
         instruction,
         repoConfig,
@@ -270,6 +350,7 @@ async function run(): Promise<void> {
         record,
         commentId,
         url,
+        branchSuffix,
         mcpTools: mcp.tools,
         renderBody,
         priorMemory,
@@ -280,6 +361,7 @@ async function run(): Promise<void> {
         ctx,
         rootDir,
         token: tokenResult.token,
+        tokenSource: tokenResult.source,
         appSlug: tokenResult.appSlug,
         model,
         instruction,
@@ -288,6 +370,7 @@ async function run(): Promise<void> {
         record,
         commentId,
         url,
+        branchSuffix,
         mcpTools: mcp.tools,
         renderBody,
         priorMemory,
@@ -328,6 +411,7 @@ interface FlowParams {
   ctx: GitHubContext;
   rootDir: string;
   token: string;
+  tokenSource: "app" | "github_token";
   model: Parameters<typeof buildAgent>[0]["model"];
   instruction: string;
   repoConfig: RepoConfig;
@@ -340,6 +424,10 @@ interface FlowParams {
   renderBody: (state: TrackingState) => string;
   /** Prior turns on this thread, fed back as context and appended to on success. */
   priorMemory: MemoryTurn[];
+  /** Suffix used for run-scoped branch names (e.g. a bare dispatch, or a proposed-branch run). */
+  branchSuffix: string;
+  /** The GitHub App slug, when authenticated via an App (used for commit identity). */
+  appSlug?: string;
 }
 
 /** The progress-mirror callback shared by both flows: reflect the plan into the tracking comment. */
@@ -356,15 +444,80 @@ function mirrorProgress(p: FlowParams): (todos: TodoItem[]) => Promise<void> {
   };
 }
 
+/** Fail fast, before any expensive work, when verified_commits can't be honored. */
+function assertVerifiedCommitsAuth(config: Config, tokenSource: "app" | "github_token"): void {
+  if (config.verifiedCommits && tokenSource !== "app") {
+    throw new Error(
+      "verified_commits is enabled but no GitHub App auth is configured (app_id + app_private_key); " +
+        "refusing to fall back to unsigned commits.",
+    );
+  }
+}
+
+/** Land the working tree's changes via the verified (GraphQL) or plain-git path, per config. */
+async function landChangesForRun(
+  p: FlowParams,
+  args: {
+    isPRMode: boolean;
+    instruction: string;
+    branchSuffix: string;
+    requireApproval: boolean;
+    continuingBranch?: boolean;
+    baseBranch?: string;
+  },
+): Promise<LandResult> {
+  if (p.config.verifiedCommits) {
+    return landChangesVerified({ octokit: p.octokit, ctx: p.ctx, rootDir: p.rootDir, ...args });
+  }
+  const identity = await resolveBotIdentity(p.octokit, p.appSlug);
+  return landChanges({
+    octokit: p.octokit,
+    ctx: p.ctx,
+    rootDir: p.rootDir,
+    token: p.token,
+    identity,
+    ...args,
+  });
+}
+
 /** Agent (implement) flow: edit files, then branch/PR or push (with optional approval gate). */
-async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void> {
-  const { octokit, ctx, rootDir, model, instruction, repoConfig, config, record, commentId, url } =
-    p;
+async function runImplement(p: FlowParams): Promise<void> {
+  const {
+    octokit,
+    ctx,
+    rootDir,
+    model,
+    instruction,
+    repoConfig,
+    config,
+    record,
+    commentId,
+    url,
+    branchSuffix,
+  } = p;
   const isPRMode = ctx.isPR;
+
+  // Fail fast (before spending an agent run) rather than silently falling
+  // back to unsigned commits when verified_commits is requested without App auth.
+  assertVerifiedCommitsAuth(config, p.tokenSource);
 
   // PR mode: switch to the PR head so the agent edits the right branch.
   if (isPRMode && ctx.prHeadRef) {
     checkoutPrHead(rootDir, p.token, ctx.owner, ctx.repo, ctx.prHeadRef);
+  }
+
+  // Issue/dispatch mode: capture the true default branch before any checkout,
+  // then continue on the issue's existing deep-agent branch if a prior
+  // mention already created one, so this run extends the same branch/PR
+  // instead of opening a new one.
+  let baseBranch: string | undefined;
+  let continuingBranch = false;
+  if (!isPRMode) {
+    baseBranch = getCurrentBranch(rootDir);
+    if (ctx.entityNumber != null) {
+      const branch = generateBranchName(ctx, branchSuffix);
+      continuingBranch = checkoutIssueBranchIfExists(rootDir, p.token, ctx.owner, ctx.repo, branch);
+    }
   }
 
   const agent = buildAgent({
@@ -378,15 +531,27 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
     extraTools: p.mcpTools,
   });
 
+  // "continue"/"resume" seeds the prior turn's incomplete todo list directly
+  // into the agent's initial state (the deepagents harness accepts `todos` as
+  // part of the input), so the plan picks up where it left off instead of
+  // starting over.
+  const resume = isResumeRequest(instruction);
+  const resumeTodos = resume ? p.priorMemory.at(-1)?.openTodos : undefined;
+
   const result = await runAgentStream(
     agent,
     {
       messages: [
         {
           role: "user",
-          content: buildUserMessage(instruction, ctx, buildMemoryContext(p.priorMemory)),
+          content: buildUserMessage(
+            instruction,
+            ctx,
+            buildMemoryContext(p.priorMemory, { resume }),
+          ),
         },
       ],
+      ...(resumeTodos?.length ? { todos: resumeTodos } : {}),
     },
     {
       threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "dispatch"}`,
@@ -405,17 +570,14 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
   // P0-7 + M4: commit + open PR / push, gated by approval when configured. A
   // budget or runtime stop forces the approval path so partial work lands as a
   // draft for review rather than directly on a branch.
-  const identity = await resolveBotIdentity(octokit, p.appSlug);
-  const land = await landChanges({
-    octokit,
-    ctx,
-    rootDir,
-    token: p.token,
+  const requireApproval = config.requirePushApproval || record.stopReason != null;
+  const land = await landChangesForRun(p, {
     isPRMode,
     instruction,
-    identity,
-    branchSuffix: process.env.GITHUB_RUN_ID || "run",
-    requireApproval: config.requirePushApproval || record.stopReason != null,
+    branchSuffix,
+    requireApproval,
+    continuingBranch,
+    baseBranch,
   });
   record.filesChanged = land.filesChanged;
   record.branch = land.branch;
@@ -444,16 +606,27 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
           instruction,
           summary: record.summary ?? "",
           prUrl: record.prUrl,
+          openTodos: record.plan,
         }),
       }),
     );
   }
 }
 
-/** Review flow (M3): review the PR diff and post inline comments; no edits. */
-async function runReview(p: FlowParams): Promise<void> {
+/**
+ * Review flow (M3): review the PR diff and post inline comments; no edits.
+ * When `applyFixes` is set (a "review and fix" mention, or `apply_suggestions`
+ * configured repo-wide), findings with a clean single-line `suggestion` are
+ * also applied directly to the files and landed as a commit before the
+ * review is posted — findings without one still surface as comments.
+ */
+async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void> {
   const { octokit, ctx, rootDir, model, instruction, repoConfig, config, record, commentId, url } =
     p;
+
+  if (p.applyFixes) {
+    assertVerifiedCommitsAuth(config, p.tokenSource);
+  }
 
   // Check out the PR head so the agent reads the proposed code (not the base
   // branch actions/checkout left), keeping its line numbers aligned to the diff.
@@ -496,10 +669,38 @@ async function runReview(p: FlowParams): Promise<void> {
   record.plan = result.todos;
   record.stopReason = result.stopped;
 
-  // Read the findings the agent wrote (file-handoff), then post the review.
+  // Read the findings the agent wrote (file-handoff).
   const review = readFindings(rootDir, result.summary);
-  await postReview(octokit, ctx, review);
-  record.summary = `Reviewed ${files.length} file(s); posted ${review.findings.length} inline comment(s).`;
+  let unhandled = review.findings;
+  let fixSummary = "";
+
+  if (p.applyFixes) {
+    const { applied, unhandled: rest } = applyReviewSuggestions(rootDir, review.findings);
+    unhandled = rest;
+    if (applied.length > 0) {
+      const land = await landChangesForRun(p, {
+        isPRMode: true,
+        instruction: `Apply ${applied.length} review suggestion(s)`,
+        branchSuffix: p.branchSuffix,
+        requireApproval: config.requirePushApproval,
+      });
+      record.filesChanged = land.filesChanged;
+      record.branch = land.branch;
+      record.prUrl = land.prUrl;
+      record.approvalPending = land.approvalPending;
+    }
+    fixSummary = `${applied.length} suggestion(s) applied directly, ${unhandled.length} require manual review.`;
+  }
+
+  // Post the review — only the findings that weren't auto-applied still
+  // surface as comments (an applied suggestion is already in the diff).
+  await postReview(octokit, ctx, { summary: review.summary, findings: unhandled });
+  record.summary = [
+    `Reviewed ${files.length} file(s); posted ${unhandled.length} inline comment(s).`,
+    fixSummary,
+  ]
+    .filter(Boolean)
+    .join(" ");
   record.status = "success";
 
   if (commentId != null) {
@@ -511,11 +712,18 @@ async function runReview(p: FlowParams): Promise<void> {
         status: "success",
         instruction,
         summary: `${record.summary}\n\n${review.summary}`,
+        prUrl: record.prUrl,
+        branch: record.branch,
+        approvalPending: record.approvalPending,
         stopReason: record.stopReason,
         tokens: record.tokens,
         costUsd: record.costUsd,
         runUrl: url,
-        memory: appendTurn(p.priorMemory, { instruction, summary: record.summary ?? "" }),
+        memory: appendTurn(p.priorMemory, {
+          instruction,
+          summary: record.summary ?? "",
+          prUrl: record.prUrl,
+        }),
       }),
     );
   }

@@ -53,6 +53,15 @@ export function parseContext(raw: RawContext): GitHubContext {
     .map((l: Label) => l.name)
     .filter(Boolean);
 
+  // The specific label/assignee this event just added, not just any label/assignee
+  // currently on the issue (which `labels` above already captures).
+  const eventLabel: string | undefined =
+    eventAction === "labeled" ? (payload as { label?: Label }).label?.name : undefined;
+  const eventAssignee: string | undefined =
+    eventAction === "assigned"
+      ? (payload as { assignee?: { login?: string } }).assignee?.login
+      : undefined;
+
   return {
     eventName,
     eventAction,
@@ -70,6 +79,8 @@ export function parseContext(raw: RawContext): GitHubContext {
     prBaseRepoFullName: pr?.base?.repo?.full_name,
     prHeadRef: pr?.head?.ref,
     labels,
+    eventLabel,
+    eventAssignee,
     payload,
   };
 }

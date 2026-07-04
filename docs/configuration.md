@@ -17,7 +17,10 @@ All inputs are optional. Source of truth: [`action.yml`](../action.yml).
 | Input | Default | Notes |
 |---|---|---|
 | `trigger_phrase` | `@agent` | Matched at a word boundary, case-insensitive — `@agentic` does not match `@agent`. |
-| `prompt` | — | An explicit instruction that bypasses the trigger phrase. Used for `workflow_dispatch`, but works on any event. |
+| `prompt` | — | An explicit instruction that bypasses the trigger phrase. Used for `workflow_dispatch`, but works on any event — including `schedule`, see [`examples/scheduled-maintenance.yml`](../examples/scheduled-maintenance.yml). |
+| `auto_run_label` | — | Label that, when applied to an issue, runs the agent without a trigger-phrase match. The issue's title/body (or `auto_run_default_instruction`) becomes the instruction. |
+| `auto_run_assignee` | — | GitHub username that, when assigned to an issue, runs the agent without a trigger-phrase match. |
+| `auto_run_default_instruction` | — | Fallback instruction for an `auto_run_label`/`auto_run_assignee` event when the issue has no usable title/body text. |
 
 ### Model
 
@@ -32,6 +35,22 @@ All inputs are optional. Source of truth: [`action.yml`](../action.yml).
 |---|---|---|
 | `allowed_permissions` | `write,admin` | Comma-separated repo permission levels allowed to trigger the agent. `maintain` satisfies a `write` requirement. |
 | `fork_allow_label` | — | A label a write-access user applies to a fork PR to authorize a run. If unset, fork PRs **never** run. |
+
+### Landing changes
+
+| Input | Default | Notes |
+|---|---|---|
+| `require_push_approval` | `false` | Gate landing behind human review: draft PR (issue mode) or a proposed branch + compare link (PR mode). |
+| `verified_commits` | `false` | Land via the GitHub App's `createCommitOnBranch` GraphQL mutation instead of `git push`, so commits show as "Verified". **Requires** `app_id`/`app_private_key` — the run fails loudly if set without App auth (no silent fallback to unsigned commits). **Limitation:** the mutation has no file-mode field, so executable-bit/symlink changes are not preserved (files always land as mode `100644`). |
+| `apply_suggestions` | `false` | Make every review run also apply its own single-line `suggestion`s directly (grouped by file, applied highest-line-first) and land them as a commit — findings without a clean single-line suggestion still surface as comments. A mention of "review and fix this PR" does this regardless of this input. |
+
+### Triage (opt-in)
+
+| Input | Default | Notes |
+|---|---|---|
+| `enable_triage` | `false` | On a new issue with no trigger phrase, run a cheap one-shot structured-output classification deciding: open a PR, request a review (only if the issue is actually a PR), ask for clarification, add labels, or do nothing. Only ever acts when the issue's author passes the same human + `allowed_permissions` check as a manual mention — triage never lowers the authorization bar. Skipped entirely if a tracking comment already exists on the issue (so it only ever runs once), and skipped whenever an explicit trigger (phrase, `auto_run_label`/`auto_run_assignee`) already matched. Any resulting `open_pr`/`review` run is forced through the approval gate (draft PR / proposed branch) regardless of `require_push_approval`. |
+| `triage_allowed_labels` | — | Labels the triage classifier may apply via the `label` action. Anything it proposes outside this list is dropped. |
+| `triage_model` | `model` | Model used for the one-shot classification call — set a cheaper model here to avoid running the full configured model on every untriggered issue. |
 
 ### Shell guardrails
 
@@ -128,6 +147,8 @@ Source of truth: [`src/config/repoConfig.ts`](../src/config/repoConfig.ts).
 | `model` | string | Overrides the workflow's `model` input. |
 | `allowed_commands` | string[] | **Replaces** the allow-list (workflow input or default). |
 | `denied_commands` | string[] | **Merged into** the deny-list. |
+| `auto_run_label` | string | Overrides the workflow's `auto_run_label` input. |
+| `auto_run_assignee` | string | Overrides the workflow's `auto_run_assignee` input. |
 
 ### Example
 

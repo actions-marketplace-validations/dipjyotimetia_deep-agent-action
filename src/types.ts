@@ -38,6 +38,10 @@ export interface GitHubContext {
   prHeadRef?: string;
   /** Labels on the issue/PR, used for maintainer gating of fork runs. */
   labels: string[];
+  /** The label just added by this specific `labeled` event, if any. */
+  eventLabel?: string;
+  /** The user just assigned by this specific `assigned` event, if any. */
+  eventAssignee?: string;
   /** Raw event payload for anything not normalized above. */
   payload: unknown;
 }
@@ -56,8 +60,33 @@ export interface Config {
   deniedCommands: string[];
   /** Label that a write-access user can apply to authorize a fork-PR run. */
   forkAllowLabel?: string;
+  /** Label that, when applied to an issue, triggers the agent without a trigger-phrase match. */
+  autoRunLabel?: string;
+  /** User that, when assigned to an issue, triggers the agent without a trigger-phrase match. */
+  autoRunAssignee?: string;
+  /** Instruction used for an auto-run (label/assignee) event when the issue has no usable text. */
+  autoRunDefaultInstruction?: string;
   /** When true, gate landing of changes behind human review (draft PR / proposed branch). */
   requirePushApproval: boolean;
+  /**
+   * When true, land commits via the GitHub App's `createCommitOnBranch`
+   * GraphQL mutation (shows as "Verified" on GitHub) instead of `git push`.
+   * Requires GitHub App auth; file-mode/symlink changes are not preserved.
+   */
+  verifiedCommits: boolean;
+  /** When true, every review run also applies its own single-line suggestions and lands them. */
+  applySuggestions: boolean;
+  /**
+   * When true, a new issue with no trigger phrase is classified by a cheap
+   * one-shot model call that decides whether to open a PR, request a review,
+   * ask for clarification, add labels, or do nothing. Default off — this
+   * changes behavior on every untriggered issue.
+   */
+  enableTriage: boolean;
+  /** Labels the triage classifier may apply; anything outside this list is ignored. */
+  triageAllowedLabels: string[];
+  /** Model used for the triage classification call; defaults to `model`. */
+  triageModel?: string;
   /** Raw MCP server config JSON (optional); empty string when unset. */
   mcpConfig: string;
   shellTimeoutSeconds: number;
