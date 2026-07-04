@@ -85,18 +85,19 @@ export function parseFindings(raw: unknown): ReviewResult {
   return { summary, findings: findings.filter((f) => f.path && f.line > 0 && f.body) };
 }
 
+const SEVERITY_PREFIXES: Record<FindingSeverity, string> = {
+  critical: "**[Critical]** ",
+  warning: "**[Warning]** ",
+  info: "**[Info]** ",
+};
+
 /**
  * Render one finding's comment body: bold severity prefix, the comment text,
  * and — when the agent proposed a concrete fix — a GitHub `suggestion` fence
  * the reviewer can apply with one click. Pure and testable.
  */
 export function formatFindingBody(f: ReviewFinding): string {
-  const prefixes: Record<FindingSeverity, string> = {
-    critical: "**[Critical]** ",
-    warning: "**[Warning]** ",
-    info: "**[Info]** ",
-  };
-  let out = `${f.severity ? prefixes[f.severity] : ""}${f.body}`;
+  let out = `${f.severity ? SEVERITY_PREFIXES[f.severity] : ""}${f.body}`;
   if (f.suggestion) {
     // A suggestion containing a triple-backtick fence needs a longer outer fence.
     const fence = f.suggestion.includes("```") ? "````" : "```";
@@ -128,16 +129,17 @@ export async function postReview(
     return;
   }
 
+  const bodies = result.findings.map((f) => truncateBody(formatFindingBody(f)));
   try {
     await octokit.rest.pulls.createReview({
       ...base,
       event: "COMMENT",
       body: truncateBody(summary),
-      comments: result.findings.map((f) => ({
+      comments: result.findings.map((f, i) => ({
         path: f.path,
         line: f.line,
         side: "RIGHT",
-        body: truncateBody(formatFindingBody(f)),
+        body: bodies[i]!,
       })),
     });
   } catch (err) {
@@ -147,7 +149,7 @@ export async function postReview(
     const folded = [
       summary,
       "",
-      ...result.findings.map((f) => `- \`${f.path}:${f.line}\` — ${formatFindingBody(f)}`),
+      ...result.findings.map((f, i) => `- \`${f.path}:${f.line}\` — ${bodies[i]!}`),
     ].join("\n");
     await octokit.rest.pulls.createReview({
       ...base,

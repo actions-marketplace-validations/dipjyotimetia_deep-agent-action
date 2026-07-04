@@ -11,7 +11,7 @@ function fakeAgent(chunks: unknown[]) {
   };
 }
 
-const opts = { threadId: "t1", debounceMs: 0 };
+const opts = { threadId: "t1", debounceMs: 0, recursionLimit: 150 };
 
 describe("runAgentStream", () => {
   test("summary is the last AI message; tokens sum over AI messages", async () => {
@@ -146,11 +146,7 @@ describe("runAgentStream", () => {
   });
 
   test("timeout: an unexpired cap leaves the run untouched and real errors propagate", async () => {
-    const ok = {
-      stream: async function* () {
-        yield { messages: [new AIMessage("done")] };
-      },
-    };
+    const ok = fakeAgent([{ messages: [new AIMessage("done")] }]);
     const result = await runAgentStream(ok, {}, { ...opts, maxRuntimeMs: 60_000 });
     expect(result.stopped).toBeUndefined();
     expect(result.summary).toBe("done");
@@ -166,7 +162,7 @@ describe("runAgentStream", () => {
     );
   });
 
-  test("recursionLimit: passed through to the stream config, defaulting to 150", async () => {
+  test("recursionLimit: passed through to the stream config", async () => {
     const seen: number[] = [];
     const agent = {
       stream: async function* (_input: unknown, config: any) {

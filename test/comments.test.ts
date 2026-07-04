@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { renderTrackingBody } from "../src/github/comments.js";
+import { renderTrackingBody, truncateTrackingBody } from "../src/github/comments.js";
+import { parseMemory, type MemoryTurn } from "../src/github/memory.js";
 
 describe("renderTrackingBody", () => {
   test("renders the plan as a checklist with status markers", () => {
@@ -62,14 +63,12 @@ describe("renderTrackingBody", () => {
     expect(body).toContain("$0.0012");
   });
 
-  test("shows a budget banner when stopped early", () => {
-    const body = renderTrackingBody({ status: "success", budgetStopped: true });
-    expect(body).toContain("budget cap");
-  });
-
-  test("shows a runtime banner when stopped at the max runtime", () => {
-    const body = renderTrackingBody({ status: "success", timedOut: true });
-    expect(body).toContain("max runtime");
+  test("shows the early-stop banner matching the reason", () => {
+    expect(renderTrackingBody({ status: "success", stopReason: "budget" })).toContain("budget cap");
+    expect(renderTrackingBody({ status: "success", stopReason: "timeout" })).toContain(
+      "max runtime",
+    );
+    expect(renderTrackingBody({ status: "success" })).not.toContain("⚠️");
   });
 
   test("embeds the hidden memory block when memory is present", () => {
@@ -82,5 +81,49 @@ describe("renderTrackingBody", () => {
 
   test("omits the memory block when there is no memory", () => {
     expect(renderTrackingBody({ status: "working" })).not.toContain("deep-agent:memory");
+  });
+});
+
+describe("truncateTrackingBody", () => {
+  const memory: MemoryTurn[] = [
+    { instruction: "add a flag", summary: "added --verbose", prUrl: "https://x/pull/1" },
+  ];
+
+  test("returns bodies under the limit unchanged", () => {
+    const body = renderTrackingBody({ status: "working", instruction: "fix bug", memory });
+    expect(truncateTrackingBody(body)).toBe(body);
+  });
+
+  test("clamps an oversized body, keeping the marker and round-tripping the memory block", () => {
+    const body = renderTrackingBody({
+      status: "success",
+      instruction: "big task",
+      summary: "x".repeat(80_000),
+      memory,
+    });
+    const out = truncateTrackingBody(body);
+    expect(out.length).toBeLessThanOrEqual(65_536);
+    expect(out.startsWith("<!-- deep-agent:tracking -->")).toBe(true);
+    expect(out).toContain("truncated");
+    expect(parseMemory(out)).toEqual(memory);
+  });
+
+  test("clamps an oversized body with no memory block", () => {
+    const body = renderTrackingBody({ status: "success", summary: "y".repeat(80_000) });
+    const out = truncateTrackingBody(body);
+    expect(out.length).toBeLessThanOrEqual(65_536);
+    expect(out.startsWith("<!-- deep-agent:tracking -->")).toBe(true);
+  });
+
+  test("drops a memory block that alone exceeds the limit (defensive)", () => {
+    // renderMemoryBlock doesn't cap fields itself (appendTurn does), so a
+    // hand-crafted oversized block must be dropped rather than kept over-limit.
+    const body = renderTrackingBody({
+      status: "success",
+      memory: [{ instruction: "i", summary: "s".repeat(70_000) }],
+    });
+    const out = truncateTrackingBody(body);
+    expect(out.length).toBeLessThanOrEqual(65_536);
+    expect(parseMemory(out)).toEqual([]);
   });
 });

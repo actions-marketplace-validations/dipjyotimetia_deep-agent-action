@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { STOP_LABELS } from "./github/comments.js";
 import type { RunRecord } from "./types.js";
 
 /** Emit Action outputs, a run summary, and the retained audit record file. */
@@ -9,8 +10,8 @@ export async function emitOutputs(record: RunRecord): Promise<void> {
   core.setOutput("status", record.status);
   core.setOutput("pr_url", record.prUrl ?? "");
   core.setOutput("branch", record.branch ?? "");
-  core.setOutput("budget_stopped", record.budgetStopped ? "true" : "false");
-  core.setOutput("timed_out", record.timedOut ? "true" : "false");
+  core.setOutput("budget_stopped", record.stopReason === "budget" ? "true" : "false");
+  core.setOutput("timed_out", record.stopReason === "timeout" ? "true" : "false");
   core.setOutput("result_json", JSON.stringify(record));
 
   await writeSummary(record);
@@ -39,15 +40,9 @@ async function writeSummary(record: RunRecord): Promise<void> {
         true,
       );
     }
-    if (record.budgetStopped) {
+    if (record.stopReason) {
       s.addRaw(
-        "**Budget:** stopped early at the configured cap; partial work opened for review.\n",
-        true,
-      );
-    }
-    if (record.timedOut) {
-      s.addRaw(
-        "**Runtime:** stopped early at the configured max runtime; partial work opened for review.\n",
+        `**Stopped early:** at the configured ${STOP_LABELS[record.stopReason]}; partial work opened for review.\n`,
         true,
       );
     }

@@ -53,7 +53,7 @@ export function retryDelayMs(ctx: RetryContext): number | undefined {
  */
 export function installRetryHook(
   octokit: Octokit,
-  opts: { maxRetries?: number; sleep?: (ms: number) => Promise<void> } = {},
+  opts: { sleep?: (ms: number) => Promise<void> } = {},
 ): void {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   octokit.hook.wrap("request", async (request, options) => {
@@ -69,7 +69,6 @@ export function installRetryHook(
         const rawRetryAfter = Number(e.response?.headers?.["retry-after"]);
         const delay = retryDelayMs({
           attempt,
-          maxRetries: opts.maxRetries,
           status: e.status,
           method: options.method,
           retryAfterSeconds: Number.isFinite(rawRetryAfter) ? rawRetryAfter : undefined,

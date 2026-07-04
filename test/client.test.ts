@@ -92,16 +92,16 @@ describe("installRetryHook", () => {
     expect(calls).toBe(1);
   });
 
-  test("gives up after maxRetries and rethrows", async () => {
+  test("gives up after the retry budget and rethrows", async () => {
     let calls = 0;
     const { octokit, call } = fakeOctokit(async () => {
       calls++;
       throw Object.assign(new Error("flaky"), { status: 500 });
     });
-    installRetryHook(octokit, { maxRetries: 2, sleep: async () => {} });
+    installRetryHook(octokit, { sleep: async () => {} });
 
     await expect(call({ method: "GET", url: "/x" })).rejects.toThrow("flaky");
-    expect(calls).toBe(3); // initial call + 2 retries
+    expect(calls).toBe(4); // initial call + 3 retries (default policy)
   });
 
   test("honors the retry-after header on a rate-limited mutation", async () => {

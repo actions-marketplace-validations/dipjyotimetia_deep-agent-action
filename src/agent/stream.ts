@@ -1,6 +1,6 @@
 import { isAIMessage, isBaseMessage } from "@langchain/core/messages";
 import type { BaseMessage, MessageContent } from "@langchain/core/messages";
-import type { TokenUsage } from "../types.js";
+import type { StopReason, TokenUsage } from "../types.js";
 import { BudgetMeter } from "./budget.js";
 import type { BudgetLimits } from "./cost.js";
 
@@ -14,7 +14,7 @@ export interface StreamResult {
   summary: string;
   tokens: TokenUsage;
   /** Set when the run was aborted early by a budget ceiling or the runtime cap. */
-  stopped?: "budget" | "timeout";
+  stopped?: StopReason;
 }
 
 /** Budget ceiling for a run, plus the model used to price tokens. */
@@ -75,8 +75,8 @@ export async function runAgentStream(
     budget?: BudgetOptions;
     /** When set, abort the run once it has been streaming this long. */
     maxRuntimeMs?: number;
-    /** Max LangGraph super-steps per run (default 150). */
-    recursionLimit?: number;
+    /** Max LangGraph super-steps per run (defaulted by `loadConfig`). */
+    recursionLimit: number;
   },
 ): Promise<StreamResult> {
   let todos: TodoItem[] = [];
@@ -87,16 +87,15 @@ export async function runAgentStream(
 
   // A budget cap is enforced by a callback meter (which sees subagent calls too);
   // a runtime cap by a timer. Both abort through the same controller, whose
-  // signal propagates into subagent invokes.
-  const needsAbort = options.budget != null || options.maxRuntimeMs != null;
-  const controller = needsAbort ? new AbortController() : undefined;
-  const meter =
-    options.budget && controller
-      ? new BudgetMeter(options.budget.model, options.budget, controller)
-      : undefined;
+  // signal propagates into subagent invokes. (An un-aborted signal is inert, so
+  // the controller is created unconditionally.)
+  const controller = new AbortController();
+  const meter = options.budget
+    ? new BudgetMeter(options.budget.model, options.budget, controller)
+    : undefined;
   let timedOut = false;
   const timer =
-    options.maxRuntimeMs != null && controller
+    options.maxRuntimeMs != null
       ? setTimeout(() => {
           timedOut = true;
           controller.abort();
@@ -109,10 +108,9 @@ export async function runAgentStream(
       streamMode: "values",
       subgraphs: true,
       // A coding loop (read → edit → test → fix) easily exceeds LangGraph's
-      // default of 25 super-steps; default well above it so real tasks don't
-      // abort mid-run.
-      recursionLimit: options.recursionLimit ?? 150,
-      ...(controller ? { signal: controller.signal } : {}),
+      // default of 25 super-steps, so the configured limit defaults well above it.
+      recursionLimit: options.recursionLimit,
+      signal: controller.signal,
       ...(meter ? { callbacks: [meter] } : {}),
     });
 

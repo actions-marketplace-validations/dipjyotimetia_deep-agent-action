@@ -1,8 +1,8 @@
 import type { Octokit } from "./client.js";
-import type { GitHubContext, RunStatus, TokenUsage } from "../types.js";
+import type { GitHubContext, RunStatus, StopReason, TokenUsage } from "../types.js";
 import type { TodoItem } from "../agent/stream.js";
-import { renderMemoryBlock, type MemoryTurn } from "./memory.js";
-import { truncateBody } from "./text.js";
+import { extractMemoryBlock, renderMemoryBlock, type MemoryTurn } from "./memory.js";
+import { truncateBody, GITHUB_COMMENT_MAX_CHARS } from "./text.js";
 
 const HEADER = "### 🤖 Deep Agent";
 /** Hidden marker used to find this run's sticky tracking comment on re-runs. */
@@ -13,6 +13,12 @@ function checkbox(status: string): string {
   if (status === "in_progress") return "- [ ] ⏳";
   return "- [ ]";
 }
+
+/** Human label per early-stop reason, used in the comment banner and job summary. */
+export const STOP_LABELS: Record<StopReason, string> = {
+  budget: "budget cap",
+  timeout: "max runtime",
+};
 
 export interface TrackingState {
   status: RunStatus | "working";
@@ -27,10 +33,8 @@ export interface TrackingState {
   costUsd?: number;
   /** When true, changes are gated behind human review (draft PR / proposed branch). */
   approvalPending?: boolean;
-  /** When true, the run was stopped early by a budget ceiling; show a banner. */
-  budgetStopped?: boolean;
-  /** When true, the run was stopped early by the runtime cap; show a banner. */
-  timedOut?: boolean;
+  /** Set when the run was deliberately stopped early; shows the matching banner. */
+  stopReason?: StopReason;
   /** Per-thread turn history, stored as a hidden block for the next run to read. */
   memory?: MemoryTurn[];
 }
@@ -80,16 +84,10 @@ export function renderTrackingBody(state: TrackingState): string {
   } else if (state.branch) {
     lines.push("", `**Branch:** \`${state.branch}\``);
   }
-  if (state.budgetStopped) {
+  if (state.stopReason) {
     lines.push(
       "",
-      "⚠️ Stopped at the configured budget cap — any partial changes were opened for review.",
-    );
-  }
-  if (state.timedOut) {
-    lines.push(
-      "",
-      "⚠️ Stopped at the configured max runtime — any partial changes were opened for review.",
+      `⚠️ Stopped at the configured ${STOP_LABELS[state.stopReason]} — any partial changes were opened for review.`,
     );
   }
   if (state.tokens && (state.tokens.input || state.tokens.output)) {
@@ -103,6 +101,22 @@ export function renderTrackingBody(state: TrackingState): string {
   if (state.memory && state.memory.length) lines.push("", renderMemoryBlock(state.memory));
 
   return lines.join("\n");
+}
+
+/**
+ * Clamp a tracking-comment body to GitHub's limit while preserving its
+ * structure: the hidden marker is the first line (safe — text is cut from the
+ * end), and the trailing memory block is split off and re-appended so it is
+ * never cut mid-block. An oversized block is dropped entirely (cross-run
+ * memory degrades gracefully on the next run). Exported for tests.
+ */
+export function truncateTrackingBody(body: string): string {
+  const limit = GITHUB_COMMENT_MAX_CHARS;
+  if (body.length <= limit) return body;
+  const { rest, block } = extractMemoryBlock(body);
+  const reserved = block ? block.length + 1 : 0;
+  if (!block || reserved >= limit) return truncateBody(rest, limit);
+  return `${truncateBody(rest, limit - reserved)}\n${block}`;
 }
 
 /**
@@ -158,7 +172,7 @@ export async function createTrackingComment(
     owner: ctx.owner,
     repo: ctx.repo,
     issue_number: ctx.entityNumber,
-    body: truncateBody(body),
+    body: truncateTrackingBody(body),
   });
   return res.data.id;
 }
@@ -174,6 +188,6 @@ export async function updateTrackingComment(
     owner: ctx.owner,
     repo: ctx.repo,
     comment_id: commentId,
-    body: truncateBody(body),
+    body: truncateTrackingBody(body),
   });
 }

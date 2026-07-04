@@ -86,6 +86,9 @@ export interface TokenUsage {
 /** Outcome status surfaced as the `status` output. */
 export type RunStatus = "success" | "skipped" | "refused" | "failed";
 
+/** Why a run was deliberately stopped early (partial work lands for review). */
+export type StopReason = "budget" | "timeout";
+
 /** One recorded tool invocation for the audit record. */
 export interface ToolCallRecord {
   name: string;
@@ -111,8 +114,6 @@ export interface RunRecord {
   costUsd?: number;
   /** True when changes were gated behind approval (draft PR / proposed branch). */
   approvalPending?: boolean;
-  /** True when the run was stopped early by a cost/token budget ceiling. */
-  budgetStopped?: boolean;
-  /** True when the run was stopped early by the max_runtime_minutes cap. */
-  timedOut?: boolean;
+  /** Set when the run was deliberately stopped early (budget ceiling / runtime cap). */
+  stopReason?: StopReason;
 }

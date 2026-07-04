@@ -1,30 +1,37 @@
 import { execFileSync } from "node:child_process";
 import { githubServerUrl, type Octokit } from "./client.js";
+import { truncateBody } from "./text.js";
 import type { GitHubContext } from "../types.js";
 
-/** Run git with arguments (no shell — args are passed directly, injection-safe). */
+/**
+ * Run git with arguments (no shell — args are passed directly, injection-safe).
+ * Failures are rethrown with the stderr detail (execFileSync puts it on the
+ * error object, not in `message`) and any authenticated remote URL redacted:
+ * git errors can echo the tokenized URL, and the message lands in the tracking
+ * comment, outputs, and audit record, where `core.setSecret` masking does not
+ * apply.
+ */
 function runGit(args: string[], cwd: string): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  try {
+    return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  } catch (err) {
+    const e = err as { stderr?: unknown; message?: string };
+    const detail =
+      typeof e.stderr === "string" && e.stderr.trim()
+        ? e.stderr.trim()
+        : (e.message ?? String(err));
+    throw new Error(
+      `git ${args[0]} failed: ${detail}`.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@"),
+    );
+  }
 }
 
-/**
- * Run `git push`, rethrowing failures with the stderr detail (execFileSync puts
- * it on the error object, not in `message`) passed through the error explainer
- * so protected-branch and non-fast-forward rejections get actionable hints.
- */
+/** Run `git push`, layering actionable hints onto known rejection messages. */
 function runGitPush(args: string[], cwd: string): void {
   try {
     runGit(args, cwd);
   } catch (err) {
-    const e = err as { stderr?: unknown; message?: string };
-    const raw =
-      typeof e.stderr === "string" && e.stderr.trim()
-        ? e.stderr.trim()
-        : (e.message ?? String(err));
-    // git may echo the authenticated remote URL; never let the token reach an
-    // error message (which lands in the tracking comment and run log).
-    const detail = raw.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@");
-    throw new Error(explainGitHubError(`git push failed: ${detail}`));
+    throw new Error(explainGitHubError(err instanceof Error ? err.message : String(err)));
   }
 }
 
@@ -201,7 +208,7 @@ export async function landChanges(params: {
       head: branch,
       base: baseBranch,
       title,
-      body,
+      body: truncateBody(body),
       draft: params.requireApproval,
     })
     .catch((err: unknown) => {

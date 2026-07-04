@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  loadConfig,
   normalizeModel,
   parseList,
   parseBool,
@@ -101,5 +102,18 @@ describe("parsePositiveInteger", () => {
     expect(() => parsePositiveInteger("0", "recursion_limit")).toThrow();
     expect(() => parsePositiveInteger("-2", "recursion_limit")).toThrow();
     expect(() => parsePositiveInteger("many", "recursion_limit")).toThrow();
+  });
+});
+
+describe("loadConfig recursion limit", () => {
+  test("defaults to 150 and honors INPUT_RECURSION_LIMIT", () => {
+    delete process.env.INPUT_RECURSION_LIMIT;
+    expect(loadConfig().recursionLimit).toBe(150);
+    process.env.INPUT_RECURSION_LIMIT = "400";
+    try {
+      expect(loadConfig().recursionLimit).toBe(400);
+    } finally {
+      delete process.env.INPUT_RECURSION_LIMIT;
+    }
   });
 });
