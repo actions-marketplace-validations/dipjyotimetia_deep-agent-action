@@ -1,10 +1,38 @@
 import { execFileSync } from "node:child_process";
 import { githubServerUrl, type Octokit } from "./client.js";
+import { truncateBody } from "./text.js";
 import type { GitHubContext } from "../types.js";
 
-/** Run git with arguments (no shell — args are passed directly, injection-safe). */
+/**
+ * Run git with arguments (no shell — args are passed directly, injection-safe).
+ * Failures are rethrown with the stderr detail (execFileSync puts it on the
+ * error object, not in `message`) and any authenticated remote URL redacted:
+ * git errors can echo the tokenized URL, and the message lands in the tracking
+ * comment, outputs, and audit record, where `core.setSecret` masking does not
+ * apply.
+ */
 function runGit(args: string[], cwd: string): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  try {
+    return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  } catch (err) {
+    const e = err as { stderr?: unknown; message?: string };
+    const detail =
+      typeof e.stderr === "string" && e.stderr.trim()
+        ? e.stderr.trim()
+        : (e.message ?? String(err));
+    throw new Error(
+      `git ${args[0]} failed: ${detail}`.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@"),
+    );
+  }
+}
+
+/** Run `git push`, layering actionable hints onto known rejection messages. */
+function runGitPush(args: string[], cwd: string): void {
+  try {
+    runGit(args, cwd);
+  } catch (err) {
+    throw new Error(explainGitHubError(err instanceof Error ? err.message : String(err)));
+  }
 }
 
 /**
@@ -19,6 +47,22 @@ export function explainGitHubError(message: string): string {
       `"Allow GitHub Actions to create and approve pull requests" under repo ` +
       `Settings → Actions → General → Workflow permissions — or you configure a ` +
       `GitHub App via the app_id / app_private_key inputs.`
+    );
+  }
+  if (/protected branch|GH006/i.test(message)) {
+    return (
+      `${message}\n\n` +
+      `The target branch has protection rules this token cannot satisfy. Enable ` +
+      `require_push_approval so changes land on a proposed branch instead, or adjust ` +
+      `the branch protection (e.g. add the GitHub App to its bypass list).`
+    );
+  }
+  if (/non-fast-forward|fetch first|failed to push some refs/i.test(message)) {
+    return (
+      `${message}\n\n` +
+      `The branch moved while the agent was working (e.g. a concurrent push or a ` +
+      `second simultaneous mention). Re-run the request; a workflow-level ` +
+      `concurrency group (see the README quickstart) serializes agent runs per issue/PR.`
     );
   }
   return message;
@@ -132,12 +176,12 @@ export async function landChanges(params: {
       const proposed = sanitizeBranchName(
         `deep-agent/proposed/${ctx.entityNumber}-${branchSuffix}`,
       );
-      runGit(["push", url, `HEAD:refs/heads/${proposed}`], rootDir);
+      runGitPush(["push", url, `HEAD:refs/heads/${proposed}`], rootDir);
       const compare = `${githubServerUrl()}/${ctx.owner}/${ctx.repo}/compare/${ctx.prHeadRef}...${proposed}?expand=1`;
       return { filesChanged, branch: proposed, prUrl: compare, approvalPending: true };
     }
     // Push to the existing PR branch (same-repo only).
-    runGit(["push", url, `HEAD:refs/heads/${ctx.prHeadRef}`], rootDir);
+    runGitPush(["push", url, `HEAD:refs/heads/${ctx.prHeadRef}`], rootDir);
     return { filesChanged, branch: ctx.prHeadRef };
   }
 
@@ -145,7 +189,7 @@ export async function landChanges(params: {
   const baseBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], rootDir);
   const branch = generateBranchName(ctx, branchSuffix);
   runGit(["branch", branch], rootDir);
-  runGit(["push", url, `${branch}:refs/heads/${branch}`], rootDir);
+  runGitPush(["push", url, `${branch}:refs/heads/${branch}`], rootDir);
 
   const body = [
     `This pull request was opened by the Deep Agent in response to a request${
@@ -164,7 +208,7 @@ export async function landChanges(params: {
       head: branch,
       base: baseBranch,
       title,
-      body,
+      body: truncateBody(body),
       draft: params.requireApproval,
     })
     .catch((err: unknown) => {

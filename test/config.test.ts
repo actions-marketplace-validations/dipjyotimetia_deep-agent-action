@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { normalizeModel, parseList, parseBool, parsePositiveNumber } from "../src/config.js";
+import {
+  loadConfig,
+  normalizeModel,
+  parseList,
+  parseBool,
+  parsePositiveNumber,
+  parsePositiveInteger,
+} from "../src/config.js";
 
 describe("normalizeModel", () => {
   test("prefixes a bare claude model with anthropic", () => {
@@ -76,5 +83,37 @@ describe("parsePositiveNumber", () => {
     expect(() => parsePositiveNumber("abc", "x")).toThrow();
     expect(() => parsePositiveNumber("0", "x")).toThrow();
     expect(() => parsePositiveNumber("-3", "x")).toThrow();
+  });
+});
+
+describe("parsePositiveInteger", () => {
+  test("returns undefined when unset", () => {
+    expect(parsePositiveInteger(undefined, "recursion_limit")).toBeUndefined();
+    expect(parsePositiveInteger("", "recursion_limit")).toBeUndefined();
+  });
+
+  test("parses a valid positive integer", () => {
+    expect(parsePositiveInteger("150", "recursion_limit")).toBe(150);
+    expect(parsePositiveInteger(" 42 ", "recursion_limit")).toBe(42);
+  });
+
+  test("throws on fractional, zero, negative, or malformed values", () => {
+    expect(() => parsePositiveInteger("1.5", "recursion_limit")).toThrow("recursion_limit");
+    expect(() => parsePositiveInteger("0", "recursion_limit")).toThrow();
+    expect(() => parsePositiveInteger("-2", "recursion_limit")).toThrow();
+    expect(() => parsePositiveInteger("many", "recursion_limit")).toThrow();
+  });
+});
+
+describe("loadConfig recursion limit", () => {
+  test("defaults to 150 and honors INPUT_RECURSION_LIMIT", () => {
+    delete process.env.INPUT_RECURSION_LIMIT;
+    expect(loadConfig().recursionLimit).toBe(150);
+    process.env.INPUT_RECURSION_LIMIT = "400";
+    try {
+      expect(loadConfig().recursionLimit).toBe(400);
+    } finally {
+      delete process.env.INPUT_RECURSION_LIMIT;
+    }
   });
 });

@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import { createAppAuth } from "@octokit/auth-app";
-import { getOctokit } from "@actions/github";
+import { makeOctokit } from "./client.js";
 
 export interface TokenResult {
   token: string;
@@ -39,7 +39,7 @@ export async function resolveToken(params: {
 
     // 1) App JWT to discover the installation on this repo.
     const appJwt = await auth({ type: "app" });
-    const appOctokit = getOctokit(appJwt.token);
+    const appOctokit = makeOctokit(appJwt.token);
     const { data: installation } = await appOctokit.rest.apps.getRepoInstallation({ owner, repo });
 
     let appSlug: string | undefined;

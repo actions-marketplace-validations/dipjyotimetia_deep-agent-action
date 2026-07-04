@@ -36,6 +36,7 @@ const base: Config = {
   mcpConfig: "",
   shellTimeoutSeconds: 600,
   commentDebounceMs: 8000,
+  recursionLimit: 150,
 };
 
 describe("mergeRepoConfig", () => {

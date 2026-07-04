@@ -1,3 +1,4 @@
+import * as core from "@actions/core";
 import type { Octokit } from "../client.js";
 
 /**
@@ -39,6 +40,11 @@ export async function checkActorPermission(
         .join(" or ")}.`,
     };
   } catch (err) {
+    // Fail closed, but leave a diagnostic so a transient API failure is
+    // distinguishable from a genuine permission refusal in the run log.
+    core.warning(
+      `Permission lookup for @${params.username} failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return {
       ok: false,
       reason: `Could not verify repository permissions for @${params.username}.`,

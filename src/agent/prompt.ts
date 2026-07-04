@@ -10,8 +10,9 @@ export function buildSystemPrompt(ctx: GitHubContext, opts: { isPRMode: boolean 
   return [
     `You are an autonomous software engineering agent operating on the GitHub repository ${repo}.`,
     `The repository is checked out at the current working directory. You can read and edit files,`,
-    `and run shell commands via the \`execute\` tool. Network access and credentials are intentionally`,
-    `unavailable in your shell — do not attempt to push, fetch remotes, or call external services.`,
+    `and run shell commands via the \`execute\` tool. Your shell has no credentials or secrets, and`,
+    `network-fetch commands (curl, wget, ssh, …) are blocked — do not attempt to push, fetch`,
+    `remotes, or call external services.`,
     ``,
     `Guidelines:`,
     `- Use the \`write_todos\` tool to plan multi-step work and keep the plan updated as you progress.`,
@@ -52,7 +53,12 @@ export function buildReviewSystemPrompt(ctx: GitHubContext): string {
     ``,
     `When finished, write your review as JSON to the file \`${REVIEW_FINDINGS_FILE}\` in the`,
     `repository root using the \`write_file\` tool, with exactly this shape:`,
-    `{ "summary": "<overall summary>", "findings": [ { "path": "<file>", "line": <number>, "body": "<comment>" } ] }`,
+    `{ "summary": "<overall summary>", "findings": [ { "path": "<file>", "line": <number>, "body": "<comment>",`,
+    `  "severity": "critical" | "warning" | "info", "suggestion": "<replacement code>" } ] }`,
+    `\`severity\` is optional — set it when you can rank the finding, omit it otherwise.`,
+    `\`suggestion\` is optional — set it only when a concrete fix for exactly the commented line(s)`,
+    `is obvious. It is applied verbatim as a GitHub suggested change replacing those lines, so it`,
+    `must be complete replacement source code, not prose.`,
     `Use an empty findings array if the change looks good. Then end with a one-line summary.`,
   ].join("\n");
 }

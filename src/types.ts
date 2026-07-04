@@ -71,6 +71,10 @@ export interface Config {
   maxCostUsd?: number;
   /** Abort the run once cumulative billed tokens (input + output) reach this many. */
   maxTotalTokens?: number;
+  /** Abort the agent once it has run this many minutes; partial work lands for review. */
+  maxRuntimeMinutes?: number;
+  /** Max LangGraph super-steps per run (defaults to 150). */
+  recursionLimit: number;
 }
 
 /** Token usage for a run. */
@@ -81,6 +85,9 @@ export interface TokenUsage {
 
 /** Outcome status surfaced as the `status` output. */
 export type RunStatus = "success" | "skipped" | "refused" | "failed";
+
+/** Why a run was deliberately stopped early (partial work lands for review). */
+export type StopReason = "budget" | "timeout";
 
 /** One recorded tool invocation for the audit record. */
 export interface ToolCallRecord {
@@ -107,6 +114,6 @@ export interface RunRecord {
   costUsd?: number;
   /** True when changes were gated behind approval (draft PR / proposed branch). */
   approvalPending?: boolean;
-  /** True when the run was stopped early by a cost/token budget ceiling. */
-  budgetStopped?: boolean;
+  /** Set when the run was deliberately stopped early (budget ceiling / runtime cap). */
+  stopReason?: StopReason;
 }

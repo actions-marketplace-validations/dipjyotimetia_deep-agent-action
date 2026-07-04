@@ -98,6 +98,11 @@ function budgetFrom(config: Config): BudgetOptions | undefined {
   };
 }
 
+/** The run-level wall-clock cap in milliseconds, or undefined when uncapped. */
+function maxRuntimeMsFrom(config: Config): number | undefined {
+  return config.maxRuntimeMinutes != null ? config.maxRuntimeMinutes * 60_000 : undefined;
+}
+
 /**
  * Construct the model + agent from the (bundled) code paths without any network
  * calls. CI runs `DEEP_AGENT_SMOKE=1 node dist/index.js` to prove the bundle can
@@ -388,16 +393,18 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
       debounceMs: config.commentDebounceMs,
       onProgress: mirrorProgress(p),
       budget: budgetFrom(config),
+      maxRuntimeMs: maxRuntimeMsFrom(config),
+      recursionLimit: config.recursionLimit,
     },
   );
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
   record.summary = result.summary;
-  record.budgetStopped = result.stopped === "budget";
+  record.stopReason = result.stopped;
 
   // P0-7 + M4: commit + open PR / push, gated by approval when configured. A
-  // budget stop forces the approval path so partial work lands as a draft for
-  // review rather than directly on a branch.
+  // budget or runtime stop forces the approval path so partial work lands as a
+  // draft for review rather than directly on a branch.
   const identity = await resolveBotIdentity(octokit, p.appSlug);
   const land = await landChanges({
     octokit,
@@ -408,7 +415,7 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
     instruction,
     identity,
     branchSuffix: process.env.GITHUB_RUN_ID || "run",
-    requireApproval: config.requirePushApproval || record.budgetStopped,
+    requireApproval: config.requirePushApproval || record.stopReason != null,
   });
   record.filesChanged = land.filesChanged;
   record.branch = land.branch;
@@ -429,7 +436,7 @@ async function runImplement(p: FlowParams & { appSlug?: string }): Promise<void>
         prUrl: record.prUrl,
         branch: record.branch,
         approvalPending: record.approvalPending,
-        budgetStopped: record.budgetStopped,
+        stopReason: record.stopReason,
         tokens: record.tokens,
         costUsd: record.costUsd,
         runUrl: url,
@@ -481,11 +488,13 @@ async function runReview(p: FlowParams): Promise<void> {
       debounceMs: config.commentDebounceMs,
       onProgress: mirrorProgress(p),
       budget: budgetFrom(config),
+      maxRuntimeMs: maxRuntimeMsFrom(config),
+      recursionLimit: config.recursionLimit,
     },
   );
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
-  record.budgetStopped = result.stopped === "budget";
+  record.stopReason = result.stopped;
 
   // Read the findings the agent wrote (file-handoff), then post the review.
   const review = readFindings(rootDir, result.summary);
@@ -502,7 +511,7 @@ async function runReview(p: FlowParams): Promise<void> {
         status: "success",
         instruction,
         summary: `${record.summary}\n\n${review.summary}`,
-        budgetStopped: record.budgetStopped,
+        stopReason: record.stopReason,
         tokens: record.tokens,
         costUsd: record.costUsd,
         runUrl: url,
