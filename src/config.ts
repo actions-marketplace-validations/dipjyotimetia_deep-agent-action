@@ -147,7 +147,15 @@ export function loadConfig(): Config {
     allowedCommands: allowedCommands.length ? allowedCommands : DEFAULT_ALLOWED_COMMANDS,
     deniedCommands: [...DEFAULT_DENIED_COMMANDS, ...deniedCommands],
     forkAllowLabel: core.getInput("fork_allow_label") || undefined,
+    autoRunLabel: core.getInput("auto_run_label") || undefined,
+    autoRunAssignee: core.getInput("auto_run_assignee") || undefined,
+    autoRunDefaultInstruction: core.getInput("auto_run_default_instruction") || undefined,
     requirePushApproval: parseBool(core.getInput("require_push_approval")),
+    verifiedCommits: parseBool(core.getInput("verified_commits")),
+    applySuggestions: parseBool(core.getInput("apply_suggestions")),
+    enableTriage: parseBool(core.getInput("enable_triage")),
+    triageAllowedLabels: parseList(core.getInput("triage_allowed_labels")),
+    triageModel: core.getInput("triage_model") || undefined,
     mcpConfig: core.getInput("mcp_config") || "",
     shellTimeoutSeconds: Number(core.getInput("shell_timeout_seconds")) || 600,
     commentDebounceMs: Number(core.getInput("comment_debounce_ms")) || 8000,
@@ -173,6 +181,8 @@ export function mergeRepoConfig(base: Config, repo: RepoConfig): Config {
     model: repo.model ? normalizeModel(repo.model).full : base.model,
     allowedCommands: repo.allowedCommands?.length ? repo.allowedCommands : base.allowedCommands,
     deniedCommands: [...new Set([...base.deniedCommands, ...(repo.deniedCommands ?? [])])],
+    autoRunLabel: repo.autoRunLabel ?? base.autoRunLabel,
+    autoRunAssignee: repo.autoRunAssignee ?? base.autoRunAssignee,
   };
 }
 

@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { parseFindings, formatFindingBody } from "../src/github/review.js";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  parseFindings,
+  formatFindingBody,
+  applySuggestion,
+  partitionApplicableFindings,
+  applyReviewSuggestions,
+} from "../src/github/review.js";
 
 describe("parseFindings", () => {
   test("parses well-formed findings", () => {
@@ -107,5 +116,70 @@ describe("formatFindingBody", () => {
     });
     expect(out).toContain("````suggestion\n");
     expect(out.endsWith("````")).toBe(true);
+  });
+});
+
+describe("applySuggestion", () => {
+  test("replaces the given 1-based line verbatim", () => {
+    expect(applySuggestion("a\nb\nc", 2, "B")).toBe("a\nB\nc");
+  });
+
+  test("returns the text unchanged when the line is out of range", () => {
+    expect(applySuggestion("a\nb", 5, "X")).toBe("a\nb");
+    expect(applySuggestion("a\nb", 0, "X")).toBe("a\nb");
+  });
+});
+
+describe("partitionApplicableFindings", () => {
+  test("splits findings with a usable suggestion from those without", () => {
+    const withSuggestion = { path: "a.ts", line: 1, body: "x", suggestion: "const a = 1;" };
+    const noSuggestion = { path: "b.ts", line: 2, body: "y" };
+    const badLine = { path: "c.ts", line: 0, body: "z", suggestion: "ignored, bad line" };
+    const { applicable, unhandled } = partitionApplicableFindings([
+      withSuggestion,
+      noSuggestion,
+      badLine,
+    ]);
+    expect(applicable).toEqual([withSuggestion]);
+    expect(unhandled).toEqual([noSuggestion, badLine]);
+  });
+});
+
+describe("applyReviewSuggestions", () => {
+  function withTempFile(contents: string, fn: (rootDir: string, relPath: string) => void): void {
+    const dir = mkdtempSync(join(tmpdir(), "deep-agent-review-"));
+    const relPath = "src/foo.ts";
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, relPath), contents);
+    fn(dir, relPath);
+  }
+
+  test("applies suggestions highest-line-first so earlier edits don't shift pending line numbers", () => {
+    withTempFile("line1\nline2\nline3\n", (dir, relPath) => {
+      const findings = [
+        { path: relPath, line: 1, body: "fix 1", suggestion: "LINE1" },
+        { path: relPath, line: 3, body: "fix 3", suggestion: "LINE3" },
+      ];
+      const { applied, unhandled } = applyReviewSuggestions(dir, findings);
+      expect(applied).toHaveLength(2);
+      expect(unhandled).toHaveLength(0);
+      expect(readFileSync(join(dir, relPath), "utf8")).toBe("LINE1\nline2\nLINE3\n");
+    });
+  });
+
+  test("moves findings for a missing file to unhandled instead of applying", () => {
+    const dir = mkdtempSync(join(tmpdir(), "deep-agent-review-"));
+    const findings = [{ path: "does/not/exist.ts", line: 1, body: "x", suggestion: "y" }];
+    const { applied, unhandled } = applyReviewSuggestions(dir, findings);
+    expect(applied).toHaveLength(0);
+    expect(unhandled).toEqual(findings);
+  });
+
+  test("findings without a suggestion are always unhandled", () => {
+    const dir = mkdtempSync(join(tmpdir(), "deep-agent-review-"));
+    const findings = [{ path: "a.ts", line: 1, body: "x" }];
+    const { applied, unhandled } = applyReviewSuggestions(dir, findings);
+    expect(applied).toHaveLength(0);
+    expect(unhandled).toEqual(findings);
   });
 });

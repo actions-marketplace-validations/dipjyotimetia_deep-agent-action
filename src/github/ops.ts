@@ -11,7 +11,7 @@ import type { GitHubContext } from "../types.js";
  * comment, outputs, and audit record, where `core.setSecret` masking does not
  * apply.
  */
-function runGit(args: string[], cwd: string): string {
+export function runGit(args: string[], cwd: string): string {
   try {
     return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
   } catch (err) {
@@ -77,11 +77,47 @@ export function sanitizeBranchName(name: string): string {
     .slice(0, 240);
 }
 
-/** Build a branch name for issue/dispatch runs, e.g. `deep-agent/issue-12-987654`. */
+/**
+ * Build a branch name for issue/dispatch runs. Stable per issue (e.g.
+ * `deep-agent/issue-12`) so a follow-up mention reuses the same branch/PR
+ * instead of opening a new one each run; falls back to a run-scoped name
+ * (`deep-agent/dispatch-<suffix>`) only when there's no issue/PR to key off
+ * (a bare `workflow_dispatch`).
+ */
 export function generateBranchName(ctx: GitHubContext, suffix: string): string {
-  const kind = ctx.isPR ? "pr" : ctx.entityNumber != null ? "issue" : "dispatch";
-  const num = ctx.entityNumber != null ? `-${ctx.entityNumber}` : "";
-  return sanitizeBranchName(`deep-agent/${kind}${num}-${suffix}`);
+  if (ctx.entityNumber != null) {
+    const kind = ctx.isPR ? "pr" : "issue";
+    return sanitizeBranchName(`deep-agent/${kind}-${ctx.entityNumber}`);
+  }
+  return sanitizeBranchName(`deep-agent/dispatch-${suffix}`);
+}
+
+/** The branch currently checked out in the workspace. */
+export function getCurrentBranch(rootDir: string): string {
+  return runGit(["rev-parse", "--abbrev-ref", "HEAD"], rootDir);
+}
+
+/**
+ * If `branch` already exists on the remote, fetch and check it out so the
+ * agent's edits (and the eventual commit) land on top of prior continuation
+ * work instead of the current default-branch HEAD. Returns false (and leaves
+ * the workspace untouched) when the branch doesn't exist remotely yet.
+ */
+export function checkoutIssueBranchIfExists(
+  rootDir: string,
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+): boolean {
+  const url = pushUrl(token, owner, repo);
+  try {
+    runGit(["fetch", "--depth=1", url, branch], rootDir);
+  } catch {
+    return false;
+  }
+  runGit(["checkout", "-B", branch, "FETCH_HEAD"], rootDir);
+  return true;
 }
 
 /** Files with uncommitted changes in the workspace. */
@@ -107,6 +143,58 @@ export function configureGitIdentity(
 function pushUrl(token: string, owner: string, repo: string): string {
   const host = githubServerUrl().replace(/^https?:\/\//, "");
   return `https://x-access-token:${token}@${host}/${owner}/${repo}.git`;
+}
+
+/** The commit/PR title derived from the instruction's first line. */
+export function commitTitle(instruction: string): string {
+  return `Deep Agent: ${instruction.split("\n")[0]!.slice(0, 72)}`;
+}
+
+/** Branch name for a PR-mode "proposed" landing (approval-gated, doesn't touch the PR branch). */
+export function proposedBranchName(ctx: GitHubContext, suffix: string): string {
+  return sanitizeBranchName(`deep-agent/proposed/${ctx.entityNumber}-${suffix}`);
+}
+
+/** Compare-view URL between the PR's head and a proposed branch. */
+export function compareUrl(ctx: GitHubContext, headRef: string, proposed: string): string {
+  return `${githubServerUrl()}/${ctx.owner}/${ctx.repo}/compare/${headRef}...${proposed}?expand=1`;
+}
+
+/** The PR body used when opening a new issue/dispatch-mode pull request. */
+export function buildPrBody(ctx: GitHubContext, instruction: string): string {
+  return [
+    `This pull request was opened by the Deep Agent in response to a request${
+      ctx.entityNumber != null ? ` on #${ctx.entityNumber}` : ""
+    }.`,
+    "",
+    "**Requested change:**",
+    "",
+    instruction,
+  ].join("\n");
+}
+
+/**
+ * Look for an existing (non-merged) PR whose head is `branch` and reuse it —
+ * reopening it first if it was closed — instead of opening a second PR for
+ * the same issue across separate mentions. Returns its URL when reused,
+ * undefined when the caller should create a new PR.
+ */
+export async function reuseExistingPr(
+  octokit: Octokit,
+  ctx: GitHubContext,
+  branch: string,
+): Promise<string | undefined> {
+  const existing = await octokit.rest.pulls
+    .list({ owner: ctx.owner, repo: ctx.repo, head: `${ctx.owner}:${branch}`, state: "all" })
+    .then((res) => res.data.find((p) => !p.merged_at))
+    .catch(() => undefined);
+  if (!existing) return undefined;
+  if (existing.state === "closed") {
+    await octokit.rest.pulls
+      .update({ owner: ctx.owner, repo: ctx.repo, pull_number: existing.number, state: "open" })
+      .catch(() => {});
+  }
+  return existing.html_url;
 }
 
 export interface LandResult {
@@ -153,6 +241,15 @@ export async function landChanges(params: {
   branchSuffix: string;
   /** Gate landing behind human review (draft PR / proposed branch). */
   requireApproval: boolean;
+  /**
+   * True when the workspace was already checked out onto the target issue
+   * branch (via `checkoutIssueBranchIfExists`) before the agent ran — the
+   * commit above already landed on top of that branch, so it only needs a
+   * push, not a fresh `git branch`.
+   */
+  continuingBranch?: boolean;
+  /** The repo's default branch, captured before any continuation checkout. */
+  baseBranch?: string;
 }): Promise<LandResult> {
   const { octokit, ctx, rootDir, token, isPRMode, instruction, identity, branchSuffix } = params;
 
@@ -161,7 +258,7 @@ export async function landChanges(params: {
 
   configureGitIdentity(rootDir, identity);
 
-  const title = `Deep Agent: ${instruction.split("\n")[0]!.slice(0, 72)}`;
+  const title = commitTitle(instruction);
   const url = pushUrl(token, ctx.owner, ctx.repo);
 
   runGit(["add", "-A"], rootDir);
@@ -173,11 +270,9 @@ export async function landChanges(params: {
     }
     if (params.requireApproval) {
       // Don't touch the PR branch; push a proposed branch + compare link for review.
-      const proposed = sanitizeBranchName(
-        `deep-agent/proposed/${ctx.entityNumber}-${branchSuffix}`,
-      );
+      const proposed = proposedBranchName(ctx, branchSuffix);
       runGitPush(["push", url, `HEAD:refs/heads/${proposed}`], rootDir);
-      const compare = `${githubServerUrl()}/${ctx.owner}/${ctx.repo}/compare/${ctx.prHeadRef}...${proposed}?expand=1`;
+      const compare = compareUrl(ctx, ctx.prHeadRef, proposed);
       return { filesChanged, branch: proposed, prUrl: compare, approvalPending: true };
     }
     // Push to the existing PR branch (same-repo only).
@@ -185,21 +280,24 @@ export async function landChanges(params: {
     return { filesChanged, branch: ctx.prHeadRef };
   }
 
-  // Issue/dispatch: branch off the current HEAD and open a PR.
-  const baseBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], rootDir);
+  // Issue/dispatch: reuse the issue's existing deep-agent branch/PR when one
+  // already exists (continuity across separate mentions), otherwise branch
+  // off the current HEAD and open a new PR.
   const branch = generateBranchName(ctx, branchSuffix);
-  runGit(["branch", branch], rootDir);
-  runGitPush(["push", url, `${branch}:refs/heads/${branch}`], rootDir);
+  const baseBranch = params.baseBranch ?? runGit(["rev-parse", "--abbrev-ref", "HEAD"], rootDir);
+  if (params.continuingBranch) {
+    runGitPush(["push", url, `HEAD:refs/heads/${branch}`], rootDir);
+  } else {
+    runGit(["branch", branch], rootDir);
+    runGitPush(["push", url, `${branch}:refs/heads/${branch}`], rootDir);
+  }
 
-  const body = [
-    `This pull request was opened by the Deep Agent in response to a request${
-      ctx.entityNumber != null ? ` on #${ctx.entityNumber}` : ""
-    }.`,
-    "",
-    "**Requested change:**",
-    "",
-    instruction,
-  ].join("\n");
+  // Reuse an existing (non-merged) PR for this branch instead of opening a
+  // second one for the same issue.
+  const reusedPrUrl = await reuseExistingPr(octokit, ctx, branch);
+  if (reusedPrUrl) {
+    return { filesChanged, branch, prUrl: reusedPrUrl, approvalPending: params.requireApproval };
+  }
 
   const pr = await octokit.rest.pulls
     .create({
@@ -208,7 +306,7 @@ export async function landChanges(params: {
       head: branch,
       base: baseBranch,
       title,
-      body: truncateBody(body),
+      body: truncateBody(buildPrBody(ctx, instruction)),
       draft: params.requireApproval,
     })
     .catch((err: unknown) => {

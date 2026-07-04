@@ -51,4 +51,34 @@ describe("parseContext", () => {
     expect(ctx.prHeadRef).toBe("feature");
     expect(ctx.triggerText).toContain("@agent review");
   });
+
+  test("captures the label just added on a labeled issues event", () => {
+    const ctx = parseContext(
+      makeRaw({
+        eventName: "issues",
+        payload: {
+          action: "labeled",
+          issue: { number: 3, title: "Bug", labels: [{ name: "bug" }, { name: "agent-auto" }] },
+          label: { name: "agent-auto" },
+        },
+      }),
+    );
+    expect(ctx.eventLabel).toBe("agent-auto");
+    expect(ctx.eventAssignee).toBeUndefined();
+  });
+
+  test("captures the assignee just added on an assigned issues event", () => {
+    const ctx = parseContext(
+      makeRaw({
+        eventName: "issues",
+        payload: {
+          action: "assigned",
+          issue: { number: 3, title: "Bug", labels: [] },
+          assignee: { login: "deep-agent-bot" },
+        },
+      }),
+    );
+    expect(ctx.eventAssignee).toBe("deep-agent-bot");
+    expect(ctx.eventLabel).toBeUndefined();
+  });
 });

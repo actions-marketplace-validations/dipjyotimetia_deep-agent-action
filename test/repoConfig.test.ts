@@ -24,6 +24,12 @@ describe("normalizeRepoConfig", () => {
     expect(normalizeRepoConfig({ nope: 1 })).toEqual({});
     expect(normalizeRepoConfig(null)).toEqual({});
   });
+
+  test("maps auto_run_label/auto_run_assignee", () => {
+    expect(
+      normalizeRepoConfig({ auto_run_label: "agent-auto", auto_run_assignee: "deep-agent-bot" }),
+    ).toEqual({ autoRunLabel: "agent-auto", autoRunAssignee: "deep-agent-bot" });
+  });
 });
 
 const base: Config = {
@@ -33,6 +39,10 @@ const base: Config = {
   allowedCommands: ["git", "npm"],
   deniedCommands: [...DEFAULT_DENIED_COMMANDS],
   requirePushApproval: false,
+  verifiedCommits: false,
+  applySuggestions: false,
+  enableTriage: false,
+  triageAllowedLabels: [],
   mcpConfig: "",
   shellTimeoutSeconds: 600,
   commentDebounceMs: 8000,
@@ -56,5 +66,14 @@ describe("mergeRepoConfig", () => {
     const merged = mergeRepoConfig(base, {});
     expect(merged.model).toBe(base.model);
     expect(merged.allowedCommands).toEqual(base.allowedCommands);
+  });
+
+  test("repo auto_run_label/auto_run_assignee override the action inputs", () => {
+    const merged = mergeRepoConfig(base, {
+      autoRunLabel: "agent-auto",
+      autoRunAssignee: "deep-agent-bot",
+    });
+    expect(merged.autoRunLabel).toBe("agent-auto");
+    expect(merged.autoRunAssignee).toBe("deep-agent-bot");
   });
 });

@@ -10,6 +10,8 @@ export interface RepoConfig {
   allowedCommands?: string[];
   deniedCommands?: string[];
   model?: string;
+  autoRunLabel?: string;
+  autoRunAssignee?: string;
 }
 
 const CONFIG_PATHS = [".github/deep-agent.yml", ".github/deep-agent.yaml", ".deep-agent.yml"];
@@ -25,6 +27,8 @@ const RepoConfigSchema = z
     allowed_commands: z.array(z.coerce.string()).optional().catch(undefined),
     denied_commands: z.array(z.coerce.string()).optional().catch(undefined),
     model: z.string().optional().catch(undefined),
+    auto_run_label: z.string().optional().catch(undefined),
+    auto_run_assignee: z.string().optional().catch(undefined),
   })
   .transform((r): RepoConfig => {
     const cfg: RepoConfig = {};
@@ -32,6 +36,8 @@ const RepoConfigSchema = z
     if (r.allowed_commands !== undefined) cfg.allowedCommands = r.allowed_commands;
     if (r.denied_commands !== undefined) cfg.deniedCommands = r.denied_commands;
     if (r.model !== undefined) cfg.model = r.model;
+    if (r.auto_run_label !== undefined) cfg.autoRunLabel = r.auto_run_label;
+    if (r.auto_run_assignee !== undefined) cfg.autoRunAssignee = r.auto_run_assignee;
     return cfg;
   });
 

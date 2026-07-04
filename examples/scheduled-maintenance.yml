@@ -1,0 +1,49 @@
+# Scheduled maintenance runs — no issue/PR mention required.
+# Copy into .github/workflows/ in the target repository.
+#
+# `detectMode()` already runs the agent unconditionally whenever a `prompt` is
+# supplied, regardless of event name — this workflow just supplies one on a
+# `schedule` trigger. No source changes are needed for this to work.
+#
+# Note: `schedule` events have no `github.event.inputs`, so `prompt` must be a
+# literal string in the workflow (not `${{ github.event.inputs.prompt }}`,
+# which is only populated for `workflow_dispatch`). `github.actor` for a
+# `schedule` event resolves to the account that owns the cron schedule (the
+# last committer of the workflow file), so authorization/permission checks
+# apply exactly as they do for a manual mention.
+name: Deep Agent (scheduled maintenance)
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # every Monday at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Override instruction for a manual run"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: deep-agent-scheduled-maintenance
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dipjyotimetia/deep-agent-action@main
+        with:
+          model: "claude-sonnet-4-6"
+          prompt: >-
+            ${{ github.event.inputs.prompt ||
+            'Check for outdated dependencies and open a PR upgrading them if any are found.' }}
+          require_push_approval: "true" # unattended runs should always land as a draft for review
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}

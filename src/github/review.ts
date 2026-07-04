@@ -1,4 +1,6 @@
 import * as core from "@actions/core";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import type { Octokit } from "./client.js";
 import type { GitHubContext } from "../types.js";
@@ -104,6 +106,75 @@ export function formatFindingBody(f: ReviewFinding): string {
     out += `\n\n${fence}suggestion\n${f.suggestion}\n${fence}`;
   }
   return out;
+}
+
+/**
+ * Apply a finding's single-line `suggestion` as a verbatim replacement of
+ * `line` (1-based) in `fileText`. Pure and testable in isolation. Returns the
+ * text unchanged if `line` is out of range (the file may have moved since the
+ * diff was reviewed).
+ */
+export function applySuggestion(fileText: string, line: number, suggestion: string): string {
+  const lines = fileText.split("\n");
+  if (line < 1 || line > lines.length) return fileText;
+  lines[line - 1] = suggestion;
+  return lines.join("\n");
+}
+
+/**
+ * Partition findings into those with a directly-applicable single-line
+ * `suggestion` and everything else. Within each file, callers must apply
+ * `applicable` findings from the highest line number down so earlier edits
+ * don't shift the line numbers of edits still pending in the same file.
+ */
+export function partitionApplicableFindings(findings: ReviewFinding[]): {
+  applicable: ReviewFinding[];
+  unhandled: ReviewFinding[];
+} {
+  const applicable: ReviewFinding[] = [];
+  const unhandled: ReviewFinding[] = [];
+  for (const f of findings) {
+    (f.suggestion && f.line > 0 ? applicable : unhandled).push(f);
+  }
+  return { applicable, unhandled };
+}
+
+/**
+ * Apply every applicable finding's single-line suggestion directly to the
+ * files on disk, grouped by path and applied highest-line-first within each
+ * file so earlier edits don't invalidate the line numbers of edits still
+ * pending in the same file. Findings whose file doesn't exist on disk are
+ * moved to `unhandled` instead of applied.
+ */
+export function applyReviewSuggestions(
+  rootDir: string,
+  findings: ReviewFinding[],
+): { applied: ReviewFinding[]; unhandled: ReviewFinding[] } {
+  const { applicable, unhandled } = partitionApplicableFindings(findings);
+  const applied: ReviewFinding[] = [];
+
+  const byPath = new Map<string, ReviewFinding[]>();
+  for (const f of applicable) {
+    const bucket = byPath.get(f.path) ?? [];
+    bucket.push(f);
+    byPath.set(f.path, bucket);
+  }
+
+  for (const [path, fileFindings] of byPath) {
+    const abs = join(rootDir, path);
+    if (!existsSync(abs)) {
+      unhandled.push(...fileFindings);
+      continue;
+    }
+    let text = readFileSync(abs, "utf8");
+    for (const f of [...fileFindings].sort((a, b) => b.line - a.line)) {
+      text = applySuggestion(text, f.line, f.suggestion!);
+      applied.push(f);
+    }
+    writeFileSync(abs, text, "utf8");
+  }
+
+  return { applied, unhandled };
 }
 
 /**

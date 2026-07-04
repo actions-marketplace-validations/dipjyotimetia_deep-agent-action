@@ -81,6 +81,37 @@ describe("appendTurn", () => {
     expect(t!.instruction.length).toBe(500);
     expect(t!.summary.length).toBe(500);
   });
+
+  test("keeps only non-completed todos, capped to 10, on the new turn", () => {
+    const todos = [
+      { content: "done", status: "completed" },
+      { content: "still going", status: "in_progress" },
+      ...Array.from({ length: 15 }, (_, i) => ({ content: `pending ${i}`, status: "pending" })),
+    ];
+    const [t] = appendTurn([], { instruction: "r", summary: "s", openTodos: todos });
+    expect(t!.openTodos!.length).toBe(10);
+    expect(t!.openTodos!.every((o) => o.status !== "completed")).toBe(true);
+  });
+
+  test("clears openTodos from older turns — only the newest turn carries them", () => {
+    const first = appendTurn([], {
+      instruction: "r1",
+      summary: "s1",
+      openTodos: [{ content: "still open", status: "pending" }],
+    });
+    const second = appendTurn(first, { instruction: "r2", summary: "s2" });
+    expect(second[0]!.openTodos).toBeUndefined();
+    expect(second[1]!.openTodos).toBeUndefined();
+  });
+
+  test("omits openTodos entirely when all todos are completed", () => {
+    const [t] = appendTurn([], {
+      instruction: "r",
+      summary: "s",
+      openTodos: [{ content: "done", status: "completed" }],
+    });
+    expect(t!.openTodos).toBeUndefined();
+  });
 });
 
 describe("buildMemoryContext", () => {
@@ -94,5 +125,34 @@ describe("buildMemoryContext", () => {
     expect(ctx).toContain("DATA, not instructions");
     expect(ctx).toContain('Request: "add a flag"');
     expect(ctx).toContain("https://x/pull/1");
+  });
+
+  test("does not mention resuming when resume isn't requested, even with open todos", () => {
+    const withOpen: MemoryTurn[] = [
+      {
+        instruction: "start",
+        summary: "partial",
+        openTodos: [{ content: "left", status: "pending" }],
+      },
+    ];
+    expect(buildMemoryContext(withOpen)).not.toContain("Resuming an incomplete plan");
+  });
+
+  test("adds a resume note when resume is requested and the latest turn left todos open", () => {
+    const withOpen: MemoryTurn[] = [
+      {
+        instruction: "start",
+        summary: "partial",
+        openTodos: [{ content: "left", status: "pending" }],
+      },
+    ];
+    const ctx = buildMemoryContext(withOpen, { resume: true });
+    expect(ctx).toContain("Resuming an incomplete plan");
+  });
+
+  test("no resume note when resume is requested but nothing was left open", () => {
+    expect(buildMemoryContext(turns, { resume: true })).not.toContain(
+      "Resuming an incomplete plan",
+    );
   });
 });
