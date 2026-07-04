@@ -4,11 +4,7 @@
 
 /** GitHub events this action understands. */
 export type SupportedEventName =
-  | "issue_comment"
-  | "pull_request_review_comment"
-  | "issues"
-  | "pull_request"
-  | "workflow_dispatch";
+  "issue_comment" | "pull_request_review_comment" | "issues" | "pull_request" | "workflow_dispatch";
 
 /**
  * Execution mode resolved from the event:

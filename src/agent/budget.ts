@@ -16,8 +16,7 @@ export function usageFromLLMResult(output: LLMResult): TokenUsage {
     for (const g of generation) {
       const msg = (g as { message?: { usage_metadata?: unknown } }).message;
       const um = msg?.usage_metadata as
-        | { input_tokens?: number; output_tokens?: number }
-        | undefined;
+        { input_tokens?: number; output_tokens?: number } | undefined;
       if (um) {
         input += um.input_tokens ?? 0;
         out += um.output_tokens ?? 0;
