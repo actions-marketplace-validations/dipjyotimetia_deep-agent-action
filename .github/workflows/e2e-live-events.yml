@@ -36,7 +36,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  E2E_MODEL: "openai:gpt-4o-mini"
+  # Routed to OpenRouter (src/agent/model.ts); the key resolves from
+  # OPENROUTER_API_KEY specifically (not the shared PROVIDER_API_KEY secret
+  # e2e.yml/demo.yml use for OpenAI), so this harness's key never collides
+  # with theirs.
+  E2E_MODEL: "openrouter:deepseek/deepseek-v4-flash"
 
 jobs:
   agent:
@@ -62,4 +66,4 @@ jobs:
           # high) or the run aborts before any plan forms at all (cap too low).
           max_total_tokens: ${{ contains(github.event.issue.labels.*.name, 'e2e-resume-cap') && '3000' || '' }}
         env:
-          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

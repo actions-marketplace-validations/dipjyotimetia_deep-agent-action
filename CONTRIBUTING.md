@@ -97,7 +97,7 @@ echo '{"status":"success","mode":"agent","model":"x","plan":[],"toolCalls":[],"f
 | `resume` | `isResumeRequest`: a capped `max_total_tokens` run stops mid-plan, then `@e2e-agent continue` asserts the new run's plan carries over the prior open todos. |
 
 Two things to know before running it:
-- **Identity.** `src/github/validation/actor.ts::checkActorIsHuman` rejects bot-authored actors — a real anti-loop protection, not weakened for this harness. The orchestrator's synthetic issues/comments must therefore be created with a real maintainer's PAT, not the default `GITHUB_TOKEN`. Add it as the **`E2E_PAT`** repository secret (in addition to `PROVIDER_API_KEY`); without it, every orchestrator job skips cleanly.
+- **Identity.** `src/github/validation/actor.ts::checkActorIsHuman` rejects bot-authored actors — a real anti-loop protection, not weakened for this harness. The orchestrator's synthetic issues/comments must therefore be created with a real maintainer's PAT, not the default `GITHUB_TOKEN`. Add it as the **`E2E_PAT`** repository secret. `e2e-live-events.yml` runs the model via OpenRouter (`openrouter:deepseek/deepseek-v4-flash`), keyed off its own **`OPENROUTER_API_KEY`** secret rather than the `PROVIDER_API_KEY` secret `e2e.yml`/`demo.yml` use for OpenAI — the two never collide. Without either secret, every job below skips cleanly.
 - **Branch reality.** `issue_comment`/`issues`/`pull_request_review_comment` workflows always run from the workflow file on the **default branch**, never from a PR's branch. This harness validates `main` *after* merge — it's a post-merge confidence check, not a PR gate like `e2e.yml`.
 
 How to run: **Actions → E2E Live Events Orchestrator → Run workflow**.
