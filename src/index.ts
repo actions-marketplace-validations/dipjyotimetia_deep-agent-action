@@ -27,6 +27,7 @@ import {
   renderTrackingBody,
   type TrackingState,
 } from "./github/comments.js";
+import { fetchThread, type ThreadInfo } from "./github/thread.js";
 import { parseMemory, appendTurn, buildMemoryContext, type MemoryTurn } from "./github/memory.js";
 import { createModel } from "./agent/model.js";
 import { buildAgent } from "./agent/createAgent.js";
@@ -307,11 +308,13 @@ async function run(): Promise<void> {
   // comment first so prior thread memory is read before we overwrite it. A
   // triage handoff is guaranteed to have none yet (runTriageCheck only hands
   // off when its own lookup found none), so skip re-fetching it.
-  const [, existingComment, mcp] = await Promise.all([
+  const [, thread, mcp] = await Promise.all([
     addEyesReaction(octokit, ctx),
-    triageHandoff ? Promise.resolve(undefined) : findTrackingComment(octokit, ctx),
+    triageHandoff ? Promise.resolve<ThreadInfo>({}) : fetchThread(octokit, ctx),
     loadMcpTools(config.mcpConfig),
   ]);
+  const existingComment = thread.trackingComment;
+  const threadContext = thread.context;
 
   // Cross-run memory: parse the prior turns once, then route the working,
   // progress, success, and failure renders through a closure that re-embeds the
@@ -354,6 +357,7 @@ async function run(): Promise<void> {
         mcpTools: mcp.tools,
         renderBody,
         priorMemory,
+        threadContext,
       });
     } else {
       await runImplement({
@@ -374,6 +378,7 @@ async function run(): Promise<void> {
         mcpTools: mcp.tools,
         renderBody,
         priorMemory,
+        threadContext,
       });
     }
     await emitOutputs(record);
@@ -424,6 +429,8 @@ interface FlowParams {
   renderBody: (state: TrackingState) => string;
   /** Prior turns on this thread, fed back as context and appended to on success. */
   priorMemory: MemoryTurn[];
+  /** Issue/PR title, description, and prior human comments, rendered for the agent's prompt. */
+  threadContext?: string;
   /** Suffix used for run-scoped branch names (e.g. a bare dispatch, or a proposed-branch run). */
   branchSuffix: string;
   /** The GitHub App slug, when authenticated via an App (used for commit identity). */
@@ -548,6 +555,7 @@ async function runImplement(p: FlowParams): Promise<void> {
             instruction,
             ctx,
             buildMemoryContext(p.priorMemory, { resume }),
+            p.threadContext,
           ),
         },
       ],
@@ -652,7 +660,12 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
       messages: [
         {
           role: "user",
-          content: buildReviewUserMessage(instruction, files, buildMemoryContext(p.priorMemory)),
+          content: buildReviewUserMessage(
+            instruction,
+            files,
+            buildMemoryContext(p.priorMemory),
+            p.threadContext,
+          ),
         },
       ],
     },

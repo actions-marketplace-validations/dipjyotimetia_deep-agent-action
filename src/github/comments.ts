@@ -6,7 +6,7 @@ import { truncateBody, GITHUB_COMMENT_MAX_CHARS } from "./text.js";
 
 const HEADER = "### 🤖 Deep Agent";
 /** Hidden marker used to find this run's sticky tracking comment on re-runs. */
-const MARKER = "<!-- deep-agent:tracking -->";
+export const MARKER = "<!-- deep-agent:tracking -->";
 
 function checkbox(status: string): string {
   if (status === "completed") return "- [x]";
