@@ -35,14 +35,15 @@ async function main(): Promise<void> {
   writeOutput("issue_number", String(issue.number));
   console.log(`Created issue ${issue.url}`);
 
-  // Turn 1: enough distinct, genuinely SEQUENTIAL steps to force multiple
-  // model turns — a fast/cheap model can otherwise batch several independent
-  // tool calls (e.g. 3 unrelated file writes) into one turn and finish before
-  // a token cap is ever checked, leaving no open todos to resume (observed
-  // live: 3 independent files completed in ~8.8k tokens under a 3000 cap).
-  // Each file here must quote the previous file's name, which the model can
-  // only know after that file's write has actually completed and been
-  // observed — forcing a read-after-write dependency chain across turns.
+  // Turn 1: enough distinct, genuinely SEQUENTIAL steps that completing all
+  // of them takes several model calls — src/agent/budget.ts checks cumulative
+  // tokens only after each full call, so the cap (see e2e-live-events.yml)
+  // must clear the cost of at least the first call (~8.7k tokens observed
+  // live — below that, it aborts before any tool, including write_todos, ever
+  // runs) while still landing before this task's later steps finish. Each
+  // file here must quote the previous file's name, which the model can only
+  // know after that file's write has actually completed and been observed —
+  // forcing a read-after-write dependency chain instead of one batched turn.
   const files = ["a", "b", "c", "d", "e"].map((letter) => `e2e-resume-${suffix}-${letter}.md`);
   const steps = files
     .map((f, i) =>
@@ -70,9 +71,10 @@ async function main(): Promise<void> {
   if (openTodos.length === 0) {
     throw new Error(
       "precondition failed: turn 1 left no open todos to resume — the configured " +
-        "max_total_tokens cap is either too high (the task completed before stopping) " +
-        "or too low (it stopped before a plan even formed). Tune it in e2e-live-events.yml " +
-        "and re-run.",
+        "max_total_tokens cap either let the whole task complete before stopping (too high), " +
+        "or aborted before the first model call even finished (too low — note the cap must " +
+        "clear that single call's token cost, or no tool, including write_todos, ever runs). " +
+        "Tune it in e2e-live-events.yml and re-run.",
     );
   }
 

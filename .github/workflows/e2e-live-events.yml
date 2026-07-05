@@ -57,13 +57,17 @@ jobs:
           auto_run_label: "e2e-agent-autorun"
           model: ${{ env.E2E_MODEL }}
           # The resume scenario's issue carries "e2e-resume-cap" from creation,
-          # so every event on it (both turns) gets this cap — small enough that
-          # a multi-item plan forms (a couple of tool calls) but turn 1 stops
-          # well before finishing it. Every other scenario's issue/PR lacks the
-          # label, so this evaluates to "" (unset — parsePositiveNumber in
-          # src/config.ts treats an empty string as no cap). Re-tune 3000 if
-          # the resume scenario reports "no open todos to resume" (cap too
-          # high) or the run aborts before any plan forms at all (cap too low).
-          max_total_tokens: ${{ contains(github.event.issue.labels.*.name, 'e2e-resume-cap') && '3000' || '' }}
+          # so every event on it (both turns) gets this cap. src/agent/budget.ts
+          # checks cumulative tokens AFTER each full model call completes — a
+          # single call here (system prompt + tool schemas) already costs ~8.7k
+          # input tokens (observed live), so any cap below that aborts after
+          # call 1, before any tool — including write_todos — ever runs. 16000
+          # clears that floor with room for a couple more calls (enough to get
+          # past planning and a file or two) while still stopping well short of
+          # finishing the full 5-file task. Every other scenario's issue/PR
+          # lacks the label, so this evaluates to "" (unset — parsePositiveNumber
+          # in src/config.ts treats an empty string as no cap). Re-tune if the
+          # resume scenario still reports "no open todos to resume".
+          max_total_tokens: ${{ contains(github.event.issue.labels.*.name, 'e2e-resume-cap') && '16000' || '' }}
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
