@@ -1,0 +1,111 @@
+# Live dogfood harness: orchestrator.
+#
+# Creates real synthetic issues/PRs/comments in this repo (via scripts/e2e/live/
+# scenario-*.ts) to fire real GitHub events that .github/workflows/e2e-live-events.yml
+# reacts to — the only way to exercise trigger-phrase detection, review mode,
+# label auto-run, resume/continue, and the thread-context fix end to end (see
+# CONTRIBUTING.md for why workflow_dispatch structurally can't).
+#
+# workflow_dispatch only — no schedule; this is a heavier, on-demand suite, not
+# a nightly one (that's what e2e.yml already covers for the dispatch-only path).
+#
+# Requires TWO secrets: OPENROUTER_API_KEY (e2e-live-events.yml runs the model
+# via OpenRouter — deepseek/deepseek-v4-flash — not the OpenAI key e2e.yml/
+# demo.yml use, so this harness never shares a key with those) and E2E_PAT — a
+# personal access token belonging to a real maintainer account. The action
+# itself rejects bot-authored actors (src/github/validation/actor.ts), so the
+# synthetic issues/comments this harness creates must be human-authored to
+# ever reach the agent at all. Without either secret, every job below skips
+# cleanly.
+name: E2E Live Events Orchestrator
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  BUN_VERSION: "1.3.14"
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      has_key: ${{ steps.check.outputs.has_key }}
+    steps:
+      - id: check
+        env:
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PAT: ${{ secrets.E2E_PAT }}
+        run: |
+          if [ -n "$OPENROUTER_KEY" ] && [ -n "$PAT" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::OPENROUTER_API_KEY and/or E2E_PAT not set; skipping the live event scenarios."
+          fi
+
+      - uses: actions/checkout@v7
+
+      - name: Ensure synthetic labels exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create e2e-synthetic --color ededed --force
+          gh label create e2e-agent-autorun --color ededed --force
+          gh label create e2e-resume-cap --color ededed --force
+
+  # Four independent scenarios — each targets a distinct synthetic issue/PR
+  # with no shared name, so (unlike e2e.yml's serialized jobs) these run in
+  # parallel (fail-fast: false so one scenario failing doesn't cancel the
+  # others). Every scenario writes an `issue_number` and/or `pr_url` output;
+  # cleanup.ts already no-ops on whichever one a given scenario didn't set, so
+  # passing both uniformly is safe.
+  scenarios:
+    needs: preflight
+    if: needs.preflight.outputs.has_key == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: thread-context
+            script: scenario-thread-context.ts
+            timeout: 15
+          - name: review
+            script: scenario-review.ts
+            timeout: 15
+          - name: auto-run
+            script: scenario-auto-run.ts
+            timeout: 15
+          # Two poll cycles (turn 1 + "continue" turn 2), each up to a 10
+          # minute internal timeout — allow enough wall clock for both plus
+          # overhead.
+          - name: resume
+            script: scenario-resume.ts
+            timeout: 25
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Run scenario
+        id: scenario
+        env:
+          GH_TOKEN: ${{ secrets.E2E_PAT }}
+        run: bun run scripts/e2e/live/${{ matrix.script }}
+
+      - name: Cleanup
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.E2E_PAT }}
+          ISSUE_NUMBER: ${{ steps.scenario.outputs.issue_number }}
+          PR_URL: ${{ steps.scenario.outputs.pr_url }}
+        run: bun run scripts/e2e/live/cleanup.ts

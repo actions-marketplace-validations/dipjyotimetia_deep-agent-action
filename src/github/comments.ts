@@ -8,6 +8,9 @@ const HEADER = "### 🤖 Deep Agent";
 /** Hidden marker used to find this run's sticky tracking comment on re-runs. */
 export const MARKER = "<!-- deep-agent:tracking -->";
 
+const STATUS_MARKER_RE = /<!-- deep-agent:status:([a-z]+) -->/;
+const STATUS_VALUES = ["working", "success", "skipped", "refused", "failed"] as const;
+
 function checkbox(status: string): string {
   if (status === "completed") return "- [x]";
   if (status === "in_progress") return "- [ ] ⏳";
@@ -39,9 +42,21 @@ export interface TrackingState {
   memory?: MemoryTurn[];
 }
 
+/**
+ * Extract the machine-readable status marker `renderTrackingBody` embeds,
+ * so consumers (e.g. the live E2E harness's poller) can read the actual
+ * `RunStatus` enum value instead of matching the human-readable banner text.
+ */
+export function parseTrackingStatus(body: string): TrackingState["status"] | undefined {
+  const status = body.match(STATUS_MARKER_RE)?.[1];
+  return (STATUS_VALUES as readonly string[]).includes(status ?? "")
+    ? (status as TrackingState["status"])
+    : undefined;
+}
+
 /** Render the single tracking-comment body from the current state. */
 export function renderTrackingBody(state: TrackingState): string {
-  const lines: string[] = [MARKER, HEADER, ""];
+  const lines: string[] = [MARKER, `<!-- deep-agent:status:${state.status} -->`, HEADER, ""];
 
   switch (state.status) {
     case "working":
