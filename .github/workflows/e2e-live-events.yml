@@ -1,0 +1,84 @@
+# Live dogfood harness: reactive consumer workflow.
+#
+# Unlike e2e.yml/demo.yml (both workflow_dispatch-only, which structurally
+# can't exercise trigger-phrase detection, review mode, label/assignee
+# auto-run, or the thread-context fix — see CONTRIBUTING.md), this workflow
+# reacts to REAL issue_comment / issues / pull_request_review_comment events,
+# so `uses: ./` runs the full src/index.ts orchestration end to end.
+#
+# Isolated on purpose: a dedicated trigger phrase ("@e2e-agent", not "@agent")
+# and dedicated labels ("e2e-agent-autorun", "e2e-resume-cap") mean nothing a
+# real contributor writes can ever collide with this harness. Only fires for
+# the repo owner as a belt-and-suspenders guard on top of the action's own
+# allowed_permissions check.
+#
+# This file only reacts to events; the events themselves are created by
+# .github/workflows/e2e-live-orchestrator.yml (via scripts/e2e/live/scenario-*.ts).
+# Runs from the DEFAULT BRANCH only (GitHub Actions limitation for these event
+# types) — it validates main after merge, it is not a PR gate.
+name: E2E Live Events
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, reopened, edited, assigned, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: e2e-live-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  E2E_MODEL: "openai:gpt-4o-mini"
+
+jobs:
+  # Every scenario except "resume" runs here, uncapped.
+  agent-normal:
+    if: >-
+      github.actor == 'dipjyotimetia' &&
+      !contains(github.event.issue.labels.*.name, 'e2e-resume-cap')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: ./
+        with:
+          trigger_phrase: "@e2e-agent"
+          auto_run_label: "e2e-agent-autorun"
+          model: ${{ env.E2E_MODEL }}
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+
+  # The resume scenario's issue carries "e2e-resume-cap" from creation, so
+  # every event on it (both turns) routes here instead — a small
+  # max_total_tokens guarantees turn 1 stops before finishing its plan.
+  agent-capped:
+    if: >-
+      github.actor == 'dipjyotimetia' &&
+      contains(github.event.issue.labels.*.name, 'e2e-resume-cap')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: ./
+        with:
+          trigger_phrase: "@e2e-agent"
+          model: ${{ env.E2E_MODEL }}
+          # Tuned to let a multi-item plan form (a couple of tool calls) but
+          # stop well before 3 files are done. Re-tune if the resume scenario
+          # reports "no open todos to resume" (cap too high) or the run aborts
+          # before any plan forms at all (cap too low).
+          max_total_tokens: "3000"
+        env:
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
