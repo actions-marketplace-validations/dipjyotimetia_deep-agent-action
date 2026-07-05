@@ -9,21 +9,28 @@
  */
 import { closeIssue, closePr } from "./github.js";
 
+async function closeIfPresent(
+  prArg: string | undefined,
+  issueArg: string | undefined,
+): Promise<void> {
+  if (prArg) console.log(`Closing PR ${prArg} (deleting branch)...`);
+  if (issueArg) console.log(`Closing issue #${issueArg}...`);
+  // Independent, both best-effort (closePr/closeIssue already swallow errors).
+  await Promise.all([
+    prArg ? closePr(prArg) : Promise.resolve(),
+    issueArg ? closeIssue(Number(issueArg)) : Promise.resolve(),
+  ]);
+}
+
 async function main(): Promise<void> {
   const issueArg = process.argv[2] || process.env.ISSUE_NUMBER;
   const prArg = process.argv[3] || process.env.PR_URL;
 
-  if (prArg) {
-    console.log(`Closing PR ${prArg} (deleting branch)...`);
-    await closePr(prArg);
-  }
-  if (issueArg) {
-    console.log(`Closing issue #${issueArg}...`);
-    await closeIssue(Number(issueArg));
-  }
   if (!prArg && !issueArg) {
     console.log("Nothing to clean up (no ISSUE_NUMBER/PR_URL provided).");
+    return;
   }
+  await closeIfPresent(prArg, issueArg);
 }
 
 main();

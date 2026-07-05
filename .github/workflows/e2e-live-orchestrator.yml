@@ -57,12 +57,34 @@ jobs:
 
   # Four independent scenarios — each targets a distinct synthetic issue/PR
   # with no shared name, so (unlike e2e.yml's serialized jobs) these run in
-  # parallel.
-  thread-context:
+  # parallel (fail-fast: false so one scenario failing doesn't cancel the
+  # others). Every scenario writes an `issue_number` and/or `pr_url` output;
+  # cleanup.ts already no-ops on whichever one a given scenario didn't set, so
+  # passing both uniformly is safe.
+  scenarios:
     needs: preflight
     if: needs.preflight.outputs.has_key == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: thread-context
+            script: scenario-thread-context.ts
+            timeout: 15
+          - name: review
+            script: scenario-review.ts
+            timeout: 15
+          - name: auto-run
+            script: scenario-auto-run.ts
+            timeout: 15
+          # Two poll cycles (turn 1 + "continue" turn 2), each up to a 10
+          # minute internal timeout — allow enough wall clock for both plus
+          # overhead.
+          - name: resume
+            script: scenario-resume.ts
+            timeout: 25
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ matrix.timeout }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -75,7 +97,7 @@ jobs:
         id: scenario
         env:
           GH_TOKEN: ${{ secrets.E2E_PAT }}
-        run: bun run scripts/e2e/live/scenario-thread-context.ts
+        run: bun run scripts/e2e/live/${{ matrix.script }}
 
       - name: Cleanup
         if: always()
@@ -83,85 +105,4 @@ jobs:
           GH_TOKEN: ${{ secrets.E2E_PAT }}
           ISSUE_NUMBER: ${{ steps.scenario.outputs.issue_number }}
           PR_URL: ${{ steps.scenario.outputs.pr_url }}
-        run: bun run scripts/e2e/live/cleanup.ts
-
-  review:
-    needs: preflight
-    if: needs.preflight.outputs.has_key == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Run scenario
-        id: scenario
-        env:
-          GH_TOKEN: ${{ secrets.E2E_PAT }}
-        run: bun run scripts/e2e/live/scenario-review.ts
-
-      - name: Cleanup
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.E2E_PAT }}
-          PR_URL: ${{ steps.scenario.outputs.pr_url }}
-        run: bun run scripts/e2e/live/cleanup.ts
-
-  auto-run:
-    needs: preflight
-    if: needs.preflight.outputs.has_key == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Run scenario
-        id: scenario
-        env:
-          GH_TOKEN: ${{ secrets.E2E_PAT }}
-        run: bun run scripts/e2e/live/scenario-auto-run.ts
-
-      - name: Cleanup
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.E2E_PAT }}
-          ISSUE_NUMBER: ${{ steps.scenario.outputs.issue_number }}
-          PR_URL: ${{ steps.scenario.outputs.pr_url }}
-        run: bun run scripts/e2e/live/cleanup.ts
-
-  # Two poll cycles (turn 1 + "continue" turn 2), each up to a 10 minute
-  # internal timeout — allow enough wall clock for both plus overhead.
-  resume:
-    needs: preflight
-    if: needs.preflight.outputs.has_key == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Run scenario
-        id: scenario
-        env:
-          GH_TOKEN: ${{ secrets.E2E_PAT }}
-        run: bun run scripts/e2e/live/scenario-resume.ts
-
-      - name: Cleanup
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.E2E_PAT }}
-          ISSUE_NUMBER: ${{ steps.scenario.outputs.issue_number }}
         run: bun run scripts/e2e/live/cleanup.ts

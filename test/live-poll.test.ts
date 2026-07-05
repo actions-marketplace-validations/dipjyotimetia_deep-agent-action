@@ -1,24 +1,36 @@
 import { describe, expect, test } from "bun:test";
-import { classifyTrackingBody } from "../scripts/e2e/live/poll.js";
-import { renderTrackingBody } from "../src/github/comments.js";
+import { expectSuccess, extractPrUrl, type PolledComment } from "../scripts/e2e/live/poll.js";
 
-describe("classifyTrackingBody", () => {
-  test("classifies every real status the tracking comment can render", () => {
-    expect(classifyTrackingBody(renderTrackingBody({ status: "working" }))).toBe("working");
-    expect(classifyTrackingBody(renderTrackingBody({ status: "success" }))).toBe("success");
-    expect(classifyTrackingBody(renderTrackingBody({ status: "skipped" }))).toBe("skipped");
-    expect(classifyTrackingBody(renderTrackingBody({ status: "refused" }))).toBe("refused");
-    expect(classifyTrackingBody(renderTrackingBody({ status: "failed" }))).toBe("failed");
+function polled(state: PolledComment["state"], body = ""): PolledComment {
+  return { state, body, updatedAt: "2026-01-01T00:00:00Z" };
+}
+
+describe("expectSuccess", () => {
+  test("does not throw when the state is success", () => {
+    expect(() => expectSuccess(polled("success"), "turn 1")).not.toThrow();
   });
 
-  test("returns undefined for a body with no tracking marker", () => {
-    expect(classifyTrackingBody("just a regular comment, not from the agent")).toBeUndefined();
-    expect(classifyTrackingBody("✅ Done. (no marker though)")).toBeUndefined();
+  test("throws a labeled error with the body for any other state", () => {
+    expect(() => expectSuccess(polled("failed", "boom"), "turn 1")).toThrow(
+      /expected turn 1 state=success, got failed\nboom/,
+    );
+  });
+});
+
+describe("extractPrUrl", () => {
+  test("extracts a plain pull-request link", () => {
+    expect(extractPrUrl("**Pull request:** https://github.com/o/r/pull/1")).toBe(
+      "https://github.com/o/r/pull/1",
+    );
   });
 
-  test("returns undefined for a marked body with no recognizable status text", () => {
+  test("extracts a draft (awaiting approval) pull-request link", () => {
     expect(
-      classifyTrackingBody("<!-- deep-agent:tracking -->\nsomething unexpected"),
-    ).toBeUndefined();
+      extractPrUrl("**Draft pull request (awaiting approval):** https://github.com/o/r/pull/2"),
+    ).toBe("https://github.com/o/r/pull/2");
+  });
+
+  test("throws when no PR link is present", () => {
+    expect(() => extractPrUrl("no link here")).toThrow(/no PR link found/);
   });
 });

@@ -12,21 +12,11 @@
  *
  * CLI: bun run scripts/e2e/live/poll.ts <owner/repo> <issue-number> [sinceIso]
  */
+import type { RunStatus } from "../../../src/types.js";
+import { MARKER, parseTrackingStatus } from "../../../src/github/comments.js";
+import { runCmd } from "./github.js";
 
-const MARKER = "<!-- deep-agent:tracking -->";
-
-export type TrackingState = "working" | "success" | "failed" | "refused" | "skipped";
-
-/** Pure: classify a tracking-comment body by the exact strings `renderTrackingBody` emits. */
-export function classifyTrackingBody(body: string): TrackingState | undefined {
-  if (!body.includes(MARKER)) return undefined;
-  if (body.includes("✅ Done.")) return "success";
-  if (body.includes("❌ The run failed.")) return "failed";
-  if (body.includes("⛔ Request not authorized.")) return "refused";
-  if (body.includes("Nothing to do.")) return "skipped";
-  if (body.includes("Working on it…")) return "working";
-  return undefined;
-}
+export type TrackingState = RunStatus | "working";
 
 export interface PolledComment {
   state: Exclude<TrackingState, "working">;
@@ -38,7 +28,7 @@ export interface PollOptions {
   owner: string;
   repo: string;
   issue: number;
-  /** Only consider a tracking comment last updated after this ISO timestamp (a second turn on the same issue). */
+  /** Only consider comments updated after this ISO timestamp (a second turn on the same issue). */
   sinceUpdatedAt?: string;
   intervalMs?: number;
   timeoutMs?: number;
@@ -50,37 +40,31 @@ interface RawComment {
   updated_at: string;
 }
 
-async function ghJson<T>(args: string[]): Promise<T> {
-  const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
-  const [out, err, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (code !== 0) throw new Error(`gh ${args.join(" ")} failed: ${err || out}`);
-  return JSON.parse(out) as T;
-}
-
 /** Poll until the tracking comment reaches a terminal (non-"working") state, or time out. */
 export async function pollTrackingComment(opts: PollOptions): Promise<PolledComment> {
   const interval = opts.intervalMs ?? 15_000;
   const timeout = opts.timeoutMs ?? 600_000;
-  const since = opts.sinceUpdatedAt ? new Date(opts.sinceUpdatedAt).getTime() : undefined;
   const deadline = Date.now() + timeout;
+  // Server-side filter on the caller-supplied boundary only (not ratcheted
+  // per-iteration by local clock, which would risk missing an update under
+  // client/server clock skew) — still cuts payload substantially for the
+  // resume scenario's second poll, which is the one case that supplies it.
+  const query = opts.sinceUpdatedAt ? `?since=${encodeURIComponent(opts.sinceUpdatedAt)}` : "";
 
   while (Date.now() < deadline) {
-    const comments = await ghJson<RawComment[]>([
+    const out = await runCmd([
+      "gh",
       "api",
-      `repos/${opts.owner}/${opts.repo}/issues/${opts.issue}/comments`,
+      `repos/${opts.owner}/${opts.repo}/issues/${opts.issue}/comments${query}`,
       "--paginate",
     ]);
+    const comments = JSON.parse(out) as RawComment[];
     const tracking = comments
       .filter((c) => typeof c.body === "string" && c.body.includes(MARKER))
-      .filter((c) => since == null || new Date(c.updated_at).getTime() > since)
       .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0];
 
     if (tracking) {
-      const state = classifyTrackingBody(tracking.body);
+      const state = parseTrackingStatus(tracking.body);
       if (state && state !== "working") {
         return { state, body: tracking.body, updatedAt: tracking.updated_at };
       }
@@ -90,6 +74,22 @@ export async function pollTrackingComment(opts: PollOptions): Promise<PolledComm
   throw new Error(
     `Timed out after ${timeout}ms waiting for a terminal tracking comment on ${opts.owner}/${opts.repo}#${opts.issue}`,
   );
+}
+
+/** Throw a consistent, labeled error unless the poll result reached "success". */
+export function expectSuccess(result: PolledComment, label: string): void {
+  if (result.state !== "success") {
+    throw new Error(`expected ${label} state=success, got ${result.state}\n${result.body}`);
+  }
+}
+
+const PR_LINK_RE = /\*\*(?:Draft p|P)ull request(?: \(awaiting approval\))?:\*\* (\S+)/;
+
+/** Extract the PR URL `renderTrackingBody` embeds once a change has landed. */
+export function extractPrUrl(body: string): string {
+  const url = body.match(PR_LINK_RE)?.[1];
+  if (!url) throw new Error(`no PR link found in tracking comment:\n${body}`);
+  return url;
 }
 
 if (import.meta.main) {

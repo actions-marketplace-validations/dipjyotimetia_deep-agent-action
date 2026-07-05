@@ -20,7 +20,7 @@ import {
   syntheticSuffix,
   writeOutput,
 } from "./github.js";
-import { pollTrackingComment } from "./poll.js";
+import { pollTrackingComment, expectSuccess } from "./poll.js";
 
 const TRIGGER_PHRASE = "@e2e-agent";
 
@@ -67,9 +67,7 @@ async function main(): Promise<void> {
   const { owner, repo } = currentRepo();
   const result = await pollTrackingComment({ owner, repo, issue: pr.number });
   console.log(`Tracking comment reached state: ${result.state}`);
-  if (result.state !== "success") {
-    throw new Error(`expected state=success, got ${result.state}\n${result.body}`);
-  }
+  expectSuccess(result, "review scenario");
 
   const reviewCount = await prReviewCount(pr.number);
   console.log(`PR review count: ${reviewCount}`);

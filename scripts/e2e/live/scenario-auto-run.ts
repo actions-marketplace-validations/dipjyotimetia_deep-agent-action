@@ -18,10 +18,9 @@ import {
   syntheticSuffix,
   writeOutput,
 } from "./github.js";
-import { pollTrackingComment } from "./poll.js";
+import { pollTrackingComment, expectSuccess, extractPrUrl } from "./poll.js";
 
 const AUTO_RUN_LABEL = "e2e-agent-autorun";
-const PR_LINK_RE = /\*\*(?:Draft p|P)ull request(?: \(awaiting approval\))?:\*\* (\S+)/;
 
 async function main(): Promise<void> {
   const suffix = syntheticSuffix();
@@ -41,16 +40,9 @@ async function main(): Promise<void> {
   const { owner, repo } = currentRepo();
   const result = await pollTrackingComment({ owner, repo, issue: issue.number });
   console.log(`Tracking comment reached state: ${result.state}`);
-  if (result.state !== "success") {
-    throw new Error(
-      `expected state=success (the agent should have run despite no trigger phrase, ` +
-        `via the auto-run label), got ${result.state}\n${result.body}`,
-    );
-  }
+  expectSuccess(result, "auto-run scenario (the agent should have run despite no trigger phrase)");
 
-  const prMatch = result.body.match(PR_LINK_RE);
-  if (!prMatch?.[1]) throw new Error(`no PR link found in tracking comment:\n${result.body}`);
-  const prUrl = prMatch[1];
+  const prUrl = extractPrUrl(result.body);
   writeOutput("pr_url", prUrl);
   console.log(`Resulting PR: ${prUrl}`);
 

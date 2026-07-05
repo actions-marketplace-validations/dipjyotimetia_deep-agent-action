@@ -2,13 +2,13 @@
  * Live regression test for resume/continue
  * (`src/modes/detector.ts::isResumeRequest`, seeded via `src/index.ts`'s
  * `resumeTodos`): runs a multi-step task on an issue carrying the
- * `e2e-resume-cap` label (routed by e2e-live-events.yml to a job variant with
- * a small `max_total_tokens`, so it stops before finishing), then comments
- * "continue" and asserts the new run's plan actually picks up the prior
- * open todos instead of starting over.
+ * `e2e-resume-cap` label (which makes e2e-live-events.yml apply a small
+ * `max_total_tokens`, so it stops before finishing), then comments "continue"
+ * and asserts the new run's plan actually picks up the prior open todos
+ * instead of starting over.
  *
  * Requires: e2e-live-events.yml already deployed on the default branch with
- * its capped job variant gated on the `e2e-resume-cap` label.
+ * its `max_total_tokens` cap gated on the `e2e-resume-cap` label.
  *
  * CLI: bun run scripts/e2e/live/scenario-resume.ts
  */
@@ -19,7 +19,7 @@ import {
   syntheticSuffix,
   writeOutput,
 } from "./github.js";
-import { pollTrackingComment } from "./poll.js";
+import { pollTrackingComment, expectSuccess } from "./poll.js";
 import { parseMemory } from "../../../src/github/memory.js";
 
 const TRIGGER_PHRASE = "@e2e-agent";
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
 
   // Turn 1: a task with enough distinct steps to force a multi-item plan,
   // deliberately run under a tight max_total_tokens (see e2e-live-events.yml's
-  // "agent-capped" job variant) so it stops before finishing all of them.
+  // label-gated cap) so it stops before finishing all of them.
   await commentOnIssue(
     issue.number,
     `${TRIGGER_PHRASE} create three files at the repo root, one at a time: ` +
@@ -48,11 +48,7 @@ async function main(): Promise<void> {
   const { owner, repo } = currentRepo();
   const turn1 = await pollTrackingComment({ owner, repo, issue: issue.number });
   console.log(`Turn 1 reached state: ${turn1.state}`);
-  if (turn1.state !== "success") {
-    throw new Error(
-      `expected turn 1 state=success (budget stops still land), got ${turn1.state}\n${turn1.body}`,
-    );
-  }
+  expectSuccess(turn1, "turn 1 (budget stops still land as success)");
 
   const turn1Memory = parseMemory(turn1.body);
   const openTodos = turn1Memory.at(-1)?.openTodos ?? [];
@@ -60,9 +56,9 @@ async function main(): Promise<void> {
   if (openTodos.length === 0) {
     throw new Error(
       "precondition failed: turn 1 left no open todos to resume — the configured " +
-        "max_total_tokens cap on the 'agent-capped' job variant is either too high " +
-        "(the task completed before stopping) or too low (it stopped before a plan " +
-        "even formed). Tune it in e2e-live-events.yml and re-run.",
+        "max_total_tokens cap is either too high (the task completed before stopping) " +
+        "or too low (it stopped before a plan even formed). Tune it in e2e-live-events.yml " +
+        "and re-run.",
     );
   }
 
@@ -75,9 +71,7 @@ async function main(): Promise<void> {
     sinceUpdatedAt: turn1.updatedAt,
   });
   console.log(`Turn 2 reached state: ${turn2.state}`);
-  if (turn2.state !== "success") {
-    throw new Error(`expected turn 2 state=success, got ${turn2.state}\n${turn2.body}`);
-  }
+  expectSuccess(turn2, "turn 2");
 
   const carriedOver = openTodos.some((t) => turn2.body.includes(t.content));
   if (!carriedOver) {

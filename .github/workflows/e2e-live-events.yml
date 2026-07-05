@@ -39,11 +39,8 @@ env:
   E2E_MODEL: "openai:gpt-4o-mini"
 
 jobs:
-  # Every scenario except "resume" runs here, uncapped.
-  agent-normal:
-    if: >-
-      github.actor == 'dipjyotimetia' &&
-      !contains(github.event.issue.labels.*.name, 'e2e-resume-cap')
+  agent:
+    if: github.actor == 'dipjyotimetia'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -55,30 +52,14 @@ jobs:
           trigger_phrase: "@e2e-agent"
           auto_run_label: "e2e-agent-autorun"
           model: ${{ env.E2E_MODEL }}
-        env:
-          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
-
-  # The resume scenario's issue carries "e2e-resume-cap" from creation, so
-  # every event on it (both turns) routes here instead — a small
-  # max_total_tokens guarantees turn 1 stops before finishing its plan.
-  agent-capped:
-    if: >-
-      github.actor == 'dipjyotimetia' &&
-      contains(github.event.issue.labels.*.name, 'e2e-resume-cap')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - uses: ./
-        with:
-          trigger_phrase: "@e2e-agent"
-          model: ${{ env.E2E_MODEL }}
-          # Tuned to let a multi-item plan form (a couple of tool calls) but
-          # stop well before 3 files are done. Re-tune if the resume scenario
-          # reports "no open todos to resume" (cap too high) or the run aborts
-          # before any plan forms at all (cap too low).
-          max_total_tokens: "3000"
+          # The resume scenario's issue carries "e2e-resume-cap" from creation,
+          # so every event on it (both turns) gets this cap — small enough that
+          # a multi-item plan forms (a couple of tool calls) but turn 1 stops
+          # well before finishing it. Every other scenario's issue/PR lacks the
+          # label, so this evaluates to "" (unset — parsePositiveNumber in
+          # src/config.ts treats an empty string as no cap). Re-tune 3000 if
+          # the resume scenario reports "no open todos to resume" (cap too
+          # high) or the run aborts before any plan forms at all (cap too low).
+          max_total_tokens: ${{ contains(github.event.issue.labels.*.name, 'e2e-resume-cap') && '3000' || '' }}
         env:
           PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}

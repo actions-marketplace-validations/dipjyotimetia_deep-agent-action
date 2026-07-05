@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { renderTrackingBody, truncateTrackingBody } from "../src/github/comments.js";
+import {
+  renderTrackingBody,
+  truncateTrackingBody,
+  parseTrackingStatus,
+} from "../src/github/comments.js";
 import { parseMemory, type MemoryTurn } from "../src/github/memory.js";
 
 describe("renderTrackingBody", () => {
@@ -81,6 +85,19 @@ describe("renderTrackingBody", () => {
 
   test("omits the memory block when there is no memory", () => {
     expect(renderTrackingBody({ status: "working" })).not.toContain("deep-agent:memory");
+  });
+});
+
+describe("parseTrackingStatus", () => {
+  test("round-trips every RunStatus (+ working) through the hidden marker", () => {
+    for (const status of ["working", "success", "skipped", "refused", "failed"] as const) {
+      expect(parseTrackingStatus(renderTrackingBody({ status }))).toBe(status);
+    }
+  });
+
+  test("returns undefined when the marker is absent or unrecognized", () => {
+    expect(parseTrackingStatus("just a regular comment")).toBeUndefined();
+    expect(parseTrackingStatus("<!-- deep-agent:status:bogus -->")).toBeUndefined();
   });
 });
 
