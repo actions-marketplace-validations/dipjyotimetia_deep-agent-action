@@ -35,14 +35,28 @@ async function main(): Promise<void> {
   writeOutput("issue_number", String(issue.number));
   console.log(`Created issue ${issue.url}`);
 
-  // Turn 1: a task with enough distinct steps to force a multi-item plan,
-  // deliberately run under a tight max_total_tokens (see e2e-live-events.yml's
-  // label-gated cap) so it stops before finishing all of them.
+  // Turn 1: enough distinct, genuinely SEQUENTIAL steps to force multiple
+  // model turns — a fast/cheap model can otherwise batch several independent
+  // tool calls (e.g. 3 unrelated file writes) into one turn and finish before
+  // a token cap is ever checked, leaving no open todos to resume (observed
+  // live: 3 independent files completed in ~8.8k tokens under a 3000 cap).
+  // Each file here must quote the previous file's name, which the model can
+  // only know after that file's write has actually completed and been
+  // observed — forcing a read-after-write dependency chain across turns.
+  const files = ["a", "b", "c", "d", "e"].map((letter) => `e2e-resume-${suffix}-${letter}.md`);
+  const steps = files
+    .map((f, i) =>
+      i === 0
+        ? `1. ${f}: a one-line fact about a fruit.`
+        : `${i + 1}. ${f}: a one-line fact about a different fruit, and it must also quote the ` +
+          `exact filename from step ${i}.`,
+    )
+    .join("\n");
   await commentOnIssue(
     issue.number,
-    `${TRIGGER_PHRASE} create three files at the repo root, one at a time: ` +
-      `e2e-resume-${suffix}-a.md, e2e-resume-${suffix}-b.md, and e2e-resume-${suffix}-c.md, ` +
-      "each with a one-line description of a different fruit.",
+    `${TRIGGER_PHRASE} first call write_todos to create a plan with one item per file below. ` +
+      "Then, strictly one at a time — write each file, then read it back to confirm before " +
+      `starting the next — create:\n${steps}`,
   );
 
   const { owner, repo } = currentRepo();
