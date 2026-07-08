@@ -24,8 +24,19 @@ export interface BuildAgentOptions {
  * model, and the command allow-list middleware.
  */
 export function buildAgent(opts: BuildAgentOptions) {
+  // Sandbox the built-in filesystem tools (ls/glob/grep/read/edit) to the
+  // workspace via `virtualMode`. With the default (virtualMode=false) those
+  // tools accept arbitrary absolute paths, so an exploratory model can glob
+  // outside the repo — and deepagents' fast-glob calls are not wrapped in
+  // try/catch, which means an unreadable directory (e.g. `/home/packer` on the
+  // GitHub runner image) throws EACCES and crashes the whole run. In virtual
+  // mode absolute paths are treated as virtual paths under rootDir and anything
+  // resolving outside the root is returned empty/error to the model instead of
+  // reaching the filesystem. The `execute` (shell) tool is NOT affected — it
+  // keeps full system access, gated by the command allow/deny list.
   const backend = new LocalShellBackend({
     rootDir: opts.rootDir,
+    virtualMode: true,
     env: buildShellEnv(),
     timeout: opts.shellTimeoutSeconds,
     maxOutputBytes: 200_000,
