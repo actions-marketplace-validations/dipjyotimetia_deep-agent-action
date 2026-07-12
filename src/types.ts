@@ -89,6 +89,12 @@ export interface Config {
   triageModel?: string;
   /** Raw MCP server config JSON (optional); empty string when unset. */
   mcpConfig: string;
+  /** Optional validated deepagents harness profile. */
+  harnessProfile?: import("deepagents").HarnessProfile;
+  /** Optional validated deepagents filesystem permission rules. */
+  filesystemPermissions?: import("deepagents").FilesystemPermission[];
+  /** Optional validated deepagents tool interrupt rules. */
+  interruptOn?: import("./agent/policy.js").InterruptPolicy;
   shellTimeoutSeconds: number;
   /** Minimum interval between tracking-comment edits, ms. */
   commentDebounceMs: number;
@@ -109,10 +115,10 @@ export interface TokenUsage {
 }
 
 /** Outcome status surfaced as the `status` output. */
-export type RunStatus = "success" | "skipped" | "refused" | "failed";
+export type RunStatus = "success" | "skipped" | "refused" | "failed" | "interrupted";
 
 /** Why a run was deliberately stopped early (partial work lands for review). */
-export type StopReason = "budget" | "timeout";
+export type StopReason = "budget" | "timeout" | "interrupt";
 
 /** One recorded tool invocation for the audit record. */
 export interface ToolCallRecord {
@@ -141,4 +147,8 @@ export interface RunRecord {
   approvalPending?: boolean;
   /** Set when the run was deliberately stopped early (budget ceiling / runtime cap). */
   stopReason?: StopReason;
+  /** Tool calls held for approval when deepagents interrupted the run. */
+  pendingInterrupts?: import("./agent/stream.js").PendingToolRequest[];
+  /** Deduplicated tool/subagent activity observed during the run. */
+  activities?: import("./agent/stream.js").StreamActivity[];
 }

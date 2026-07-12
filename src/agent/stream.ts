@@ -13,8 +13,25 @@ export interface StreamResult {
   todos: TodoItem[];
   summary: string;
   tokens: TokenUsage;
-  /** Set when the run was aborted early by a budget ceiling or the runtime cap. */
+  /** Set when the run was aborted early by a budget, runtime, or HITL ceiling. */
   stopped?: StopReason;
+  /** Tool requests held by the deepagents HITL middleware. */
+  pendingInterrupts?: PendingToolRequest[];
+  /** Deduplicated tool activity observed across main and subagent streams. */
+  activities: StreamActivity[];
+}
+
+export interface PendingToolRequest {
+  name: string;
+  args?: unknown;
+}
+
+export interface StreamActivity {
+  type: "tool_call" | "tool_result";
+  name: string;
+  namespace: string[];
+  /** Provider/tool-call id used to distinguish repeated calls in one namespace. */
+  id?: string;
 }
 
 /** Budget ceiling for a run, plus the model used to price tokens. */
@@ -52,6 +69,58 @@ function mapTodos(raw: unknown): TodoItem[] {
   });
 }
 
+function mapPendingInterrupts(raw: unknown): PendingToolRequest[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const requests: PendingToolRequest[] = [];
+  for (const item of raw) {
+    const value = (item ?? {}) as { value?: unknown };
+    const interruptValue = (value.value ?? {}) as { actionRequests?: unknown };
+    if (!Array.isArray(interruptValue.actionRequests)) continue;
+    for (const action of interruptValue.actionRequests) {
+      const request = (action ?? {}) as { name?: unknown; args?: unknown };
+      if (typeof request.name !== "string" || !request.name) continue;
+      requests.push({
+        name: request.name,
+        ...(request.args !== undefined ? { args: request.args } : {}),
+      });
+    }
+  }
+  return requests.length ? requests : [];
+}
+
+function messageActivities(messages: BaseMessage[], namespace: string[]): StreamActivity[] {
+  const activities: StreamActivity[] = [];
+  for (const message of messages) {
+    if (isAIMessage(message)) {
+      for (const call of message.tool_calls ?? []) {
+        if (typeof call.name === "string" && call.name) {
+          activities.push({
+            type: "tool_call",
+            name: call.name,
+            namespace,
+            ...(typeof call.id === "string" && call.id ? { id: call.id } : {}),
+          });
+        }
+      }
+    } else if (message.getType() === "tool") {
+      const name = typeof message.name === "string" ? message.name : "";
+      if (name) {
+        const toolCallId =
+          "tool_call_id" in message && typeof message.tool_call_id === "string"
+            ? message.tool_call_id
+            : undefined;
+        activities.push({
+          type: "tool_result",
+          name,
+          namespace,
+          ...(toolCallId ? { id: toolCallId } : {}),
+        });
+      }
+    }
+  }
+  return activities;
+}
+
 /**
  * Drive the agent via streaming, mirroring plan/progress as it goes.
  *
@@ -70,6 +139,7 @@ export async function runAgentStream(
   options: {
     threadId: string;
     onProgress?: (todos: TodoItem[]) => Promise<void> | void;
+    onActivity?: (activity: StreamActivity) => Promise<void> | void;
     debounceMs: number;
     /** When set, meter token spend and abort the run if a ceiling is crossed. */
     budget?: BudgetOptions;
@@ -84,6 +154,10 @@ export async function runAgentStream(
   let finalMessages: BaseMessage[] = [];
   let lastMirrorKey = "";
   let lastMirrorAt = 0;
+  let interrupted = false;
+  let pendingInterrupts: PendingToolRequest[] | undefined;
+  const activities: StreamActivity[] = [];
+  const activityKeys = new Set<string>();
 
   // A budget cap is enforced by a callback meter (which sees subagent calls too);
   // a runtime cap by a timer. Both abort through the same controller, whose
@@ -117,10 +191,24 @@ export async function runAgentStream(
     for await (const item of stream) {
       const { namespace, state } = extractState(item);
       if (!state || typeof state !== "object") continue;
+      const s = state as { todos?: unknown; messages?: unknown; __interrupt__?: unknown };
+      const stateInterrupts = mapPendingInterrupts(s.__interrupt__);
+      if (stateInterrupts !== undefined) {
+        interrupted = true;
+        pendingInterrupts = stateInterrupts;
+      }
+      const stateMessages = Array.isArray(s.messages) ? s.messages.filter(isBaseMessage) : [];
+      for (const activity of messageActivities(stateMessages, namespace.map(String))) {
+        const key = `${activity.type}:${activity.namespace.join("/")}:${activity.id ?? activity.name}`;
+        if (activityKeys.has(key)) continue;
+        activityKeys.add(key);
+        activities.push(activity);
+        if (options.onActivity) await options.onActivity(activity);
+      }
+
       // Only the main agent (empty namespace) drives the canonical plan/summary.
       if (namespace.length !== 0) continue;
 
-      const s = state as { todos?: unknown; messages?: unknown };
       if (Array.isArray(s.todos)) {
         todos = mapTodos(s.todos);
         todosKey = JSON.stringify(todos); // re-keyed only when the plan changes
@@ -166,7 +254,9 @@ export async function runAgentStream(
     todos,
     summary: lastAiText(finalMessages),
     tokens,
-    stopped: meter?.stopped ?? (timedOut ? "timeout" : undefined),
+    stopped: meter?.stopped ?? (timedOut ? "timeout" : interrupted ? "interrupt" : undefined),
+    ...(pendingInterrupts !== undefined ? { pendingInterrupts } : {}),
+    activities,
   };
 }
 

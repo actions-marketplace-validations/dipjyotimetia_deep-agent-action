@@ -55,12 +55,25 @@ Set `require_push_approval: true`:
 
 See [examples/approval-gate.yml](../examples/approval-gate.yml).
 
-## 6. Scoped tokens & least privilege
+## 6. Repository guidance and deepagents policy
+
+The action loads only repository-local `.deepagents/AGENTS.md` and `.deepagents/skills/` sources. Issue, PR, and comment text is supplied separately as untrusted task data; it is not merged into repository guidance.
+
+- `AGENTS.md` is read as always-on context, not as a place to store credentials or task state.
+- Deepagents filesystem writes under `/.deepagents/**` are denied before custom permission rules are applied, so a repository config cannot make its own guidance writable through built-in file tools.
+- `harness_profile`, `filesystem_permissions`, and `interrupt_on` inputs are strict-validated. Workflow inputs take precedence over repository defaults for these fields.
+- The filesystem permission rules do not sandbox shell execution. Keep using the command allow-list, deny-list, and secret-free environment; a real container/jail is required for hard process isolation.
+
+## 7. Tool interrupts
+
+Configured MCP tools are interrupted before execution by default. A paused request is recorded in the tracking comment and audit output, and the action exits with `status: interrupted`. Because GitHub runners are ephemeral, the action does not claim to resume the exact graph; a fresh `@agent resume` run uses the existing branch and sticky-comment memory.
+
+## 8. Scoped tokens & least privilege
 
 - By default the action uses the workflow's `GITHUB_TOKEN`. Scope it with the `permissions:` block — grant only `contents`, `pull-requests`, and `issues` write as needed.
 - For a stronger identity (and to let the agent's PRs trigger CI), configure a **GitHub App**. The action mints a **short-lived, installation-scoped** token via [`@octokit/auth-app`](https://github.com/octokit/auth-app.js). — [`src/github/auth.ts`](../src/github/auth.ts), [examples/github-app.yml](../examples/github-app.yml).
 
-## 7. Auditability
+## 9. Auditability
 
 Every run is recorded:
 

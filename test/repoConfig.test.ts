@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { normalizeRepoConfig } from "../src/config/repoConfig.js";
 import { mergeRepoConfig, DEFAULT_DENIED_COMMANDS } from "../src/config.js";
+import {
+  parseFilesystemPermissions,
+  parseHarnessProfile,
+  parseInterruptPolicy,
+} from "../src/agent/policy.js";
 import type { Config } from "../src/types.js";
 
 describe("normalizeRepoConfig", () => {
@@ -11,12 +16,20 @@ describe("normalizeRepoConfig", () => {
         allowed_commands: ["git", "make"],
         denied_commands: ["rm"],
         model: "openai:gpt-5",
+        harness_profile: { systemPromptSuffix: "follow the repo" },
+        filesystem_permissions: [{ operations: ["read"], paths: ["/src/**"] }],
+        interrupt_on: { publish_release: true },
       }),
     ).toEqual({
       systemPrompt: "be terse",
       allowedCommands: ["git", "make"],
       deniedCommands: ["rm"],
       model: "openai:gpt-5",
+      harnessProfile: expect.objectContaining({
+        systemPromptSuffix: "follow the repo",
+      }),
+      filesystemPermissions: [{ operations: ["read"], paths: ["/src/**"] }],
+      interruptOn: { publish_release: true },
     });
   });
 
@@ -75,5 +88,35 @@ describe("mergeRepoConfig", () => {
     });
     expect(merged.autoRunLabel).toBe("agent-auto");
     expect(merged.autoRunAssignee).toBe("deep-agent-bot");
+  });
+
+  test("action policy inputs take precedence over repo defaults", () => {
+    const actionHarnessProfile = parseHarnessProfile('{"systemPromptSuffix":"action"}')!;
+    const repoHarnessProfile = parseHarnessProfile('{"systemPromptSuffix":"repo"}')!;
+    const actionFilesystemPermissions = parseFilesystemPermissions(
+      '[{"operations":["read"],"paths":["/action/**"]}]',
+    )!;
+    const repoFilesystemPermissions = parseFilesystemPermissions(
+      '[{"operations":["read"],"paths":["/repo/**"]}]',
+    )!;
+    const actionInterruptOn = parseInterruptPolicy('{"action_tool":true}')!;
+    const repoInterruptOn = parseInterruptPolicy('{"repo_tool":true}')!;
+    const actionPolicy = {
+      harnessProfile: actionHarnessProfile,
+      filesystemPermissions: actionFilesystemPermissions,
+      interruptOn: actionInterruptOn,
+    };
+    const merged = mergeRepoConfig(
+      { ...base, ...actionPolicy },
+      {
+        harnessProfile: repoHarnessProfile,
+        filesystemPermissions: repoFilesystemPermissions,
+        interruptOn: repoInterruptOn,
+      },
+    );
+
+    expect(merged.harnessProfile).toBe(actionHarnessProfile);
+    expect(merged.filesystemPermissions).toEqual(actionPolicy.filesystemPermissions);
+    expect(merged.interruptOn).toEqual(actionPolicy.interruptOn);
   });
 });

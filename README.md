@@ -55,6 +55,8 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 - 💰 **Cost reporting** — token usage and an estimated USD cost surfaced in the comment, job summary, and machine-readable output.
 - 🛑 **Spend caps** — optional `max_cost_usd` / `max_total_tokens` ceilings stop a run the moment it crosses the limit (counting subagent spend too) and land the partial work as a draft for review.
 - 🧠 **Cross-run memory** — a compact history of prior `@agent` turns on the same issue/PR is carried forward as context on the next mention. No backend; stored in the sticky comment.
+- 🧩 **Deepagents memory and skills** — repository-local `.deepagents/AGENTS.md` is loaded as read-only guidance, while `.deepagents/skills/` exposes progressive-disclosure `SKILL.md` workflows to the agent.
+- ⏸️ **Tool approval interrupts** — MCP tools require approval by default when configured; an interrupt pauses safely, records the pending request, and asks for a fresh `@agent resume` run.
 - 🛡️ **Shell guardrails** — an allow-list and an always-on deny-list for shell commands, plus a secret-free environment.
 - 🍴 **Fork-PR protection** — fork PRs are denied by default; maintainers opt in per-PR with a label.
 - 🧰 **MCP tools** — connect Model Context Protocol servers to extend what the agent can do.
@@ -152,7 +154,7 @@ GitHub event (comment / issue / PR / dispatch)
         └─ post inline review comments
         │
         ▼
-6. Finalize ─ update the sticky comment (status, plan, PR link, tokens/cost) + emit outputs + audit artifact
+6. Finalize ─ update the sticky comment (status, plan, activity, PR link, tokens/cost) + emit outputs + audit artifact
 ```
 
 The agent only acts when it is both **triggered** (a mention or explicit prompt) and **authorized** (a human collaborator with write/admin access). Secrets are never exposed to the agent's shell. See the [security model](docs/security.md) for the full picture.
@@ -196,6 +198,9 @@ All inputs are optional.
 | `model` | Model id, optionally provider-prefixed. See [Models & providers](#models--providers). | `claude-sonnet-4-6` |
 | `base_url` | Endpoint URL for the `openai-compatible` provider. | — |
 | `mcp_config` | MCP servers JSON: `{ "mcpServers": { name: { command, args, env } \| { url } } }`. | — |
+| `harness_profile` | Strict deepagents harness-profile JSON (`systemPromptSuffix`, tool overrides, excluded tools/middleware, or general-purpose subagent settings). | — |
+| `filesystem_permissions` | Strict deepagents filesystem-rule JSON with `operations`, absolute glob `paths`, and optional `mode`. `.deepagents/` stays write-protected. | — |
+| `interrupt_on` | Strict deepagents HITL policy JSON. MCP tools are interrupted by default; explicit `false` disables a default. | — |
 | `allowed_permissions` | Comma-separated repo permission levels allowed to trigger the agent. | `write,admin` |
 | `allowed_commands` | Comma/newline-separated allow-list of shell commands. | a common dev toolchain¹ |
 | `denied_commands` | Extra command names to block (merged with the built-in deny-list). | — |
@@ -238,11 +243,12 @@ All inputs are optional.
 
 | Output | Description |
 |---|---|
-| `status` | Run outcome: `success` \| `skipped` \| `refused` \| `failed`. |
+| `status` | Run outcome: `success` \| `skipped` \| `refused` \| `failed` \| `interrupted`. |
 | `pr_url` | URL of the opened pull request (or compare link), if any. |
 | `branch` | Branch the agent pushed to, if any. |
 | `budget_stopped` | `true` when a cost/token cap stopped the run early (partial work opened for review). |
 | `timed_out` | `true` when `max_runtime_minutes` stopped the run early (partial work opened for review). |
+| `interrupted` | `true` when deepagents paused before a configured tool requiring approval. |
 | `result_json` | Machine-readable run record (plan, files changed, tokens, cost, outcome). |
 
 Every run also writes a job summary and uploads a `deep-agent-run` artifact (`deep-agent-run.json`) as an audit record.
@@ -259,9 +265,16 @@ system_prompt: |
 model: claude-sonnet-4-6
 allowed_commands: [git, pnpm, node, pytest]
 denied_commands: [rm]
+harness_profile:
+  systemPromptSuffix: "Prefer the repository's established patterns."
+filesystem_permissions:
+  - operations: [read]
+    paths: ["/src/**"]
+interrupt_on:
+  publish_release: true
 ```
 
-Repo config merges over the workflow inputs. A committed config can narrow the allow-list and add denials, but it can never weaken the built-in deny-list. Full field reference in [docs/configuration.md](docs/configuration.md).
+Repo config supplies defaults for the deepagents policy fields; explicit workflow inputs take precedence for those fields. A committed config can narrow the allow-list and add denials, but it can never weaken the built-in deny-list. Full field reference in [docs/configuration.md](docs/configuration.md).
 
 ## Security
 
@@ -272,6 +285,8 @@ The agent runs untrusted, model-generated commands, so the action is defensive b
 - **Secret-free shell** — the agent's shell sees an allow-listed, secret-free environment; provider keys and `GITHUB_TOKEN` are never exposed to it.
 - **Command guardrails** — an allow-list plus an always-on deny-list (network/privilege tools are blocked even if allow-listed).
 - **Human-approval gate** — `require_push_approval: true` holds changes behind a draft PR or a proposed branch for review.
+- **Repository guidance boundary** — only `.deepagents/AGENTS.md` and `.deepagents/skills/` are loaded by deepagents; their built-in filesystem writes are denied, and issue/PR text remains separate untrusted data.
+- **Tool interrupts** — configured MCP tools can pause before execution; the action records the pending request and never pretends that an ephemeral runner can resume the paused graph.
 
 This is a guardrail model, not a sandbox — run it on the providers and repos you trust. See [docs/security.md](docs/security.md) for the full threat model, and [SECURITY.md](SECURITY.md) to report a vulnerability.
 

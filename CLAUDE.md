@@ -42,7 +42,7 @@ CI (`.github/workflows/ci.yml`) runs typecheck → format:check → test → smo
 
 ### Agent assembly (`src/agent/`)
 
-`createAgent.ts:buildAgent` wires a `LocalShellBackend` (rooted at the workspace, enabling the `execute` tool) + the model + the shell-guard middleware + any MCP tools. `stream.ts:runAgentStream` drives it in `"values"` streamMode and mirrors the `todos` plan into the tracking comment (debounced; `recursionLimit` is raised to 150 because a read→edit→test→fix loop exceeds LangGraph's default 25).
+`createAgent.ts:buildAgent` wires a `LocalShellBackend` (rooted at the workspace, enabling the `execute` tool) + the model + repository-local deepagents memory/skills + validated filesystem permissions/HITL policy + the shell-guard middleware + any MCP tools. `stream.ts:runAgentStream` drives it in `"values"` streamMode, mirrors the `todos` plan into the tracking comment (debounced), and records typed main/subagent tool activity and pending interrupts. `recursionLimit` is raised to 150 because a read→edit→test→fix loop exceeds LangGraph's default 25.
 
 ### Critical constraints (these are the easy things to break)
 
@@ -50,6 +50,8 @@ CI (`.github/workflows/ci.yml`) runs typecheck → format:check → test → smo
 - **The agent shell is secret-free by construction.** `agent/env.ts` is an *allow-list* of env var names; provider keys, `GITHUB_TOKEN`, App keys, and `INPUT_*` are excluded, so they can never leak into a model-directed shell command. Don't add secret-bearing names to that list.
 - **The built-in command deny-list cannot be weakened.** `mergeRepoConfig` always re-merges `DEFAULT_DENIED_COMMANDS` (`config.ts`), so a committed repo config can narrow the allow-list and add denials but never remove a default denial. `shellGuard.ts` enforces allow/deny per command segment plus a global token scan (for denials hidden in `$(...)`).
 - **The agent never runs git/push.** It only edits files in the workspace; all commit/branch/push/PR operations live in `github/ops.ts` and run with the scoped token via `execFileSync("git", ...)` (no shell — injection-safe).
+- **Deepagents repository guidance is intentionally narrow.** Only `.deepagents/AGENTS.md` and `.deepagents/skills/` are discovered. Built-in filesystem writes under `.deepagents/` are denied before custom permission rules; issue/PR text stays in a separate user-message data section.
+- **Interrupts are safe stops, not durable resumes.** MCP tools are interrupted by default when configured. The action records pending requests, lands partial work through the approval path, and a later `@agent resume` starts a fresh run using sticky-comment memory because the runner has no persistent checkpointer/store.
 - **ESM with explicit `.js` import extensions.** Source is `.ts` but imports use `.js` (e.g. `from "./config.js"`). Keep this when adding imports.
 
 ### Review-mode handoff
@@ -59,7 +61,7 @@ In review mode the agent writes findings to a JSON file (`REVIEW_FINDINGS_FILE`,
 ## Making changes
 
 - **Adding a provider:** add a `case` to `agent/model.ts`; optionally a bare-name inference rule to `PROVIDER_BY_PREFIX` in `config.ts`; a price entry in `agent/cost.ts`; document in `action.yml` + `docs/providers.md`; and add it to `smoke` (in `index.ts`) so CI exercises the import.
-- **Adding/changing an input:** keep three places in sync — `action.yml` (declaration + `INPUT_*` env passthrough), `config.ts:loadConfig`, and the input tables in `README.md` / `docs/configuration.md`.
+- **Adding/changing an input:** keep three places in sync — `action.yml` (declaration + `INPUT_*` env passthrough), `config.ts:loadConfig`, and the input tables in `README.md` / `docs/configuration.md`. For deepagents policy inputs, also update `config/repoConfig.ts` and its precedence tests.
 - **Tests** are one `*.test.ts` per module under `test/`, Bun's runner, no network. Prefer extracting pure functions and testing those (see `normalizeModel`, `checkContainsTrigger`, `evaluateCommand`, `estimateCostUsd`).
 
 Deeper detail — full file map, the live E2E harness (`.github/workflows/e2e.yml`), and the threat model — is in `CONTRIBUTING.md` and `docs/` (`configuration.md`, `providers.md`, `security.md`, `troubleshooting.md`).
