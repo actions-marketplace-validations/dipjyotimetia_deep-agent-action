@@ -1,6 +1,11 @@
 import * as core from "@actions/core";
 import type { Config } from "./types.js";
 import type { RepoConfig } from "./config/repoConfig.js";
+import {
+  parseFilesystemPermissions,
+  parseHarnessProfile,
+  parseInterruptPolicy,
+} from "./agent/policy.js";
 
 /** Default shell commands the agent is allowed to run. */
 export const DEFAULT_ALLOWED_COMMANDS = [
@@ -157,6 +162,9 @@ export function loadConfig(): Config {
     triageAllowedLabels: parseList(core.getInput("triage_allowed_labels")),
     triageModel: core.getInput("triage_model") || undefined,
     mcpConfig: core.getInput("mcp_config") || "",
+    harnessProfile: parseHarnessProfile(core.getInput("harness_profile")),
+    filesystemPermissions: parseFilesystemPermissions(core.getInput("filesystem_permissions")),
+    interruptOn: parseInterruptPolicy(core.getInput("interrupt_on")),
     shellTimeoutSeconds: Number(core.getInput("shell_timeout_seconds")) || 600,
     commentDebounceMs: Number(core.getInput("comment_debounce_ms")) || 8000,
     maxCostUsd: parsePositiveNumber(core.getInput("max_cost_usd"), "max_cost_usd"),
@@ -183,6 +191,9 @@ export function mergeRepoConfig(base: Config, repo: RepoConfig): Config {
     deniedCommands: [...new Set([...base.deniedCommands, ...(repo.deniedCommands ?? [])])],
     autoRunLabel: repo.autoRunLabel ?? base.autoRunLabel,
     autoRunAssignee: repo.autoRunAssignee ?? base.autoRunAssignee,
+    harnessProfile: base.harnessProfile ?? repo.harnessProfile,
+    filesystemPermissions: base.filesystemPermissions ?? repo.filesystemPermissions,
+    interruptOn: base.interruptOn ?? repo.interruptOn,
   };
 }
 

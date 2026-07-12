@@ -37,7 +37,12 @@ import {
   buildReviewSystemPrompt,
   buildReviewUserMessage,
 } from "./agent/prompt.js";
-import { runAgentStream, type TodoItem, type BudgetOptions } from "./agent/stream.js";
+import {
+  runAgentStream,
+  type StreamActivity,
+  type TodoItem,
+  type BudgetOptions,
+} from "./agent/stream.js";
 import { loadMcpTools } from "./agent/mcp.js";
 import { estimateCostUsd } from "./agent/cost.js";
 import {
@@ -440,6 +445,7 @@ interface FlowParams {
 /** The progress-mirror callback shared by both flows: reflect the plan into the tracking comment. */
 function mirrorProgress(p: FlowParams): (todos: TodoItem[]) => Promise<void> {
   return async (todos) => {
+    p.record.plan = todos;
     if (p.commentId != null) {
       await updateTrackingComment(
         p.octokit,
@@ -448,6 +454,30 @@ function mirrorProgress(p: FlowParams): (todos: TodoItem[]) => Promise<void> {
         p.renderBody({ status: "working", instruction: p.instruction, todos, runUrl: p.url }),
       );
     }
+  };
+}
+
+/** Record typed activity and occasionally mirror the latest event to GitHub. */
+function mirrorActivity(p: FlowParams): (activity: StreamActivity) => Promise<void> {
+  let lastMirrorAt = 0;
+  return async (activity) => {
+    p.record.activities ??= [];
+    p.record.activities.push(activity);
+    const now = Date.now();
+    if (p.commentId == null || now - lastMirrorAt < p.config.commentDebounceMs) return;
+    lastMirrorAt = now;
+    await updateTrackingComment(
+      p.octokit,
+      p.ctx,
+      p.commentId,
+      p.renderBody({
+        status: "working",
+        instruction: p.instruction,
+        todos: p.record.plan,
+        activity,
+        runUrl: p.url,
+      }),
+    );
   };
 }
 
@@ -529,8 +559,12 @@ async function runImplement(p: FlowParams): Promise<void> {
 
   const agent = buildAgent({
     model,
+    modelSpec: config.model,
     rootDir,
     systemPrompt: systemPromptFor(buildSystemPrompt(ctx, { isPRMode }), repoConfig),
+    harnessProfile: config.harnessProfile,
+    filesystemPermissions: config.filesystemPermissions,
+    interruptOn: config.interruptOn,
     allowedCommands: config.allowedCommands,
     deniedCommands: config.deniedCommands,
     shellTimeoutSeconds: config.shellTimeoutSeconds,
@@ -565,6 +599,7 @@ async function runImplement(p: FlowParams): Promise<void> {
       threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "dispatch"}`,
       debounceMs: config.commentDebounceMs,
       onProgress: mirrorProgress(p),
+      onActivity: mirrorActivity(p),
       budget: budgetFrom(config),
       maxRuntimeMs: maxRuntimeMsFrom(config),
       recursionLimit: config.recursionLimit,
@@ -574,6 +609,8 @@ async function runImplement(p: FlowParams): Promise<void> {
   record.plan = result.todos;
   record.summary = result.summary;
   record.stopReason = result.stopped;
+  record.pendingInterrupts = result.pendingInterrupts;
+  record.activities = result.activities;
 
   // P0-7 + M4: commit + open PR / push, gated by approval when configured. A
   // budget or runtime stop forces the approval path so partial work lands as a
@@ -591,7 +628,7 @@ async function runImplement(p: FlowParams): Promise<void> {
   record.branch = land.branch;
   record.prUrl = land.prUrl;
   record.approvalPending = land.approvalPending;
-  record.status = "success";
+  record.status = result.stopped === "interrupt" ? "interrupted" : "success";
 
   if (commentId != null) {
     await updateTrackingComment(
@@ -599,7 +636,7 @@ async function runImplement(p: FlowParams): Promise<void> {
       ctx,
       commentId,
       p.renderBody({
-        status: "success",
+        status: record.status,
         instruction,
         todos: record.plan,
         summary: record.summary,
@@ -607,6 +644,8 @@ async function runImplement(p: FlowParams): Promise<void> {
         branch: record.branch,
         approvalPending: record.approvalPending,
         stopReason: record.stopReason,
+        interrupts: record.pendingInterrupts,
+        activity: record.activities?.at(-1),
         tokens: record.tokens,
         costUsd: record.costUsd,
         runUrl: url,
@@ -645,8 +684,12 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
   const files = await fetchPrFiles(octokit, ctx);
   const agent = buildAgent({
     model,
+    modelSpec: config.model,
     rootDir,
     systemPrompt: systemPromptFor(buildReviewSystemPrompt(ctx), repoConfig),
+    harnessProfile: config.harnessProfile,
+    filesystemPermissions: config.filesystemPermissions,
+    interruptOn: config.interruptOn,
     allowedCommands: config.allowedCommands,
     deniedCommands: config.deniedCommands,
     shellTimeoutSeconds: config.shellTimeoutSeconds,
@@ -673,6 +716,7 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
       threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "review"}`,
       debounceMs: config.commentDebounceMs,
       onProgress: mirrorProgress(p),
+      onActivity: mirrorActivity(p),
       budget: budgetFrom(config),
       maxRuntimeMs: maxRuntimeMsFrom(config),
       recursionLimit: config.recursionLimit,
@@ -681,6 +725,38 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
   record.stopReason = result.stopped;
+  record.pendingInterrupts = result.pendingInterrupts;
+  record.activities = result.activities;
+
+  if (result.stopped === "interrupt") {
+    record.summary = result.summary || "The review paused before an external tool was run.";
+    record.status = "interrupted";
+    if (commentId != null) {
+      await updateTrackingComment(
+        octokit,
+        ctx,
+        commentId,
+        p.renderBody({
+          status: "interrupted",
+          instruction,
+          todos: record.plan,
+          summary: record.summary,
+          interrupts: record.pendingInterrupts,
+          activity: record.activities?.at(-1),
+          stopReason: record.stopReason,
+          tokens: record.tokens,
+          costUsd: record.costUsd,
+          runUrl: url,
+          memory: appendTurn(p.priorMemory, {
+            instruction,
+            summary: record.summary,
+            openTodos: record.plan,
+          }),
+        }),
+      );
+    }
+    return;
+  }
 
   // Read the findings the agent wrote (file-handoff).
   const review = readFindings(rootDir, result.summary);
@@ -729,6 +805,8 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
         branch: record.branch,
         approvalPending: record.approvalPending,
         stopReason: record.stopReason,
+        interrupts: record.pendingInterrupts,
+        activity: record.activities?.at(-1),
         tokens: record.tokens,
         costUsd: record.costUsd,
         runUrl: url,

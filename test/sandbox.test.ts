@@ -1,9 +1,11 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { LocalShellBackend } from "deepagents";
+import { FakeToolCallingModel } from "langchain";
 import { buildShellEnv } from "../src/agent/env.js";
+import { buildAgent } from "../src/agent/createAgent.js";
 
 /**
  * Regression guard for the workspace sandboxing that `buildAgent` relies on.
@@ -64,5 +66,39 @@ describe("buildAgent filesystem sandbox (virtualMode)", () => {
     // deepagents returns { content, ... } on success.
     const content = (result as { content?: string }).content ?? "";
     expect(content).toContain("export const x = 1");
+  });
+
+  test("built-in filesystem tools cannot write repository deepagents guidance", async () => {
+    const guardedRoot = mkdtempSync(join(tmpdir(), "da-policy-"));
+    mkdirSync(join(guardedRoot, ".deepagents"), { recursive: true });
+    writeFileSync(join(guardedRoot, ".deepagents", "AGENTS.md"), "original\n");
+
+    const agent = buildAgent({
+      model: new FakeToolCallingModel({
+        toolCalls: [
+          [
+            {
+              name: "write_file",
+              args: {
+                file_path: "/.deepagents/AGENTS.md",
+                content: "tampered\n",
+              },
+              id: "write-memory",
+            },
+          ],
+        ],
+      }),
+      rootDir: guardedRoot,
+      systemPrompt: "test",
+      allowedCommands: ["echo"],
+      deniedCommands: [],
+      shellTimeoutSeconds: 5,
+      toolCallRecord: [],
+    });
+
+    await expect(
+      agent.invoke({ messages: [{ role: "user", content: "rewrite the guidance" }] }),
+    ).rejects.toThrow("permission denied");
+    expect(readFileSync(join(guardedRoot, ".deepagents", "AGENTS.md"), "utf8")).toBe("original\n");
   });
 });

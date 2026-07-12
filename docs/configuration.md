@@ -88,7 +88,7 @@ The deny-list always wins: a command on both lists is blocked. See [security.md]
 
 ### Cost & runtime controls
 
-All are unset by default (no cap). A cap is metered across **every** model call — the main agent and its subagents — and aborts the run the instant a ceiling is crossed; the partial work then lands through the approval path (a draft PR / proposed branch) for review, and the matching output (`budget_stopped` or `timed_out`) is set to `true`.
+All are unset by default (no cap). A cap is metered across **every** model call — the main agent and its subagents — and aborts the run the instant a ceiling is crossed; the partial work then lands through the approval path (a draft PR / proposed branch) for review, and the matching output (`budget_stopped` or `timed_out`) is set to `true`. Tool interrupts use the separate `interrupted` output.
 
 | Input | Default | Notes |
 |---|---|---|
@@ -103,8 +103,37 @@ A malformed value (e.g. `"$5"` or a negative number) fails the run loudly rather
 | Input | Default | Notes |
 |---|---|---|
 | `mcp_config` | — | MCP servers JSON (see [mcp-tools.yml](../examples/mcp-tools.yml)). |
+| `harness_profile` | — | Strict JSON deepagents harness profile. Supports prompt suffixes, tool-description overrides, excluded tools/middleware, and general-purpose subagent settings. |
+| `filesystem_permissions` | — | Strict JSON array of deepagents filesystem rules. Paths must be absolute globs; writes under `.deepagents/` are always denied. |
+| `interrupt_on` | — | Strict JSON map of tool names to `true`, `false`, or an `allowedDecisions` object. Configured MCP tools default to `true`. |
 | `comment_debounce_ms` | `8000` | Minimum interval between edits to the sticky progress comment. |
 | `recursion_limit` | `150` | Max LangGraph super-steps per run. A long read → edit → test → fix loop can exceed the default; raise it if a run aborts with a recursion-limit error. |
+
+### Deepagents memory, skills, and approval
+
+The action automatically discovers only these repository-local sources:
+
+```text
+.deepagents/AGENTS.md
+.deepagents/skills/<skill-name>/SKILL.md
+```
+
+`AGENTS.md` is loaded as always-on project guidance. Skills are loaded progressively: the agent receives their metadata first and reads a full `SKILL.md` only when the task needs it. The built-in deepagents filesystem tools cannot write under `.deepagents/`; the existing shell command guard remains a separate guardrail.
+
+The action's existing sticky-comment memory remains the durable per-issue/PR conversation history. It is separate from repository guidance. The action does not configure a deepagents checkpointer or store because a GitHub runner is ephemeral; an interrupt therefore stops safely and the next `@agent resume` starts a fresh run on the existing branch with the prior comment memory.
+
+When MCP tools are loaded, each tool is interrupted before execution by default. Set an explicit tool to `false` to allow it, or supply an object such as:
+
+```json
+{
+  "publish_release": {
+    "allowedDecisions": ["approve", "reject"],
+    "description": "Review the release publication."
+  }
+}
+```
+
+An interrupted run emits `status: interrupted`, `interrupted: true`, and pending tool metadata in `result_json`; partial work is forced through the existing approval path. Comment `@agent resume` to start a new invocation after reviewing the request.
 
 ---
 
@@ -149,6 +178,9 @@ Source of truth: [`src/config/repoConfig.ts`](../src/config/repoConfig.ts).
 | `denied_commands` | string[] | **Merged into** the deny-list. |
 | `auto_run_label` | string | Overrides the workflow's `auto_run_label` input. |
 | `auto_run_assignee` | string | Overrides the workflow's `auto_run_assignee` input. |
+| `harness_profile` | mapping | Deepagents harness profile. Invalid repository values are ignored; an explicit workflow input wins. |
+| `filesystem_permissions` | mapping[] | Deepagents filesystem permission rules. The action always prepends a deny rule for writes under `.deepagents/`. |
+| `interrupt_on` | mapping | Deepagents HITL tool policy. Configured MCP tools still default to interruption. |
 
 ### Example
 
@@ -160,11 +192,20 @@ system_prompt: |
 model: claude-sonnet-4-6
 allowed_commands: [git, pnpm, node, pytest]
 denied_commands: [rm]
+harness_profile:
+  systemPromptSuffix: "Prefer the repository's established patterns."
+filesystem_permissions:
+  - operations: [read]
+    paths: ["/src/**"]
+interrupt_on:
+  publish_release: true
 ```
 
 ### Merge rules
 
-- Repo config is applied **on top of** the workflow inputs.
+- Repo config is applied on top of the workflow inputs for the original tuning fields.
 - `model` and `allowed_commands` **override** the input-derived values when present.
+- For `harness_profile`, `filesystem_permissions`, and `interrupt_on`, an explicitly supplied workflow input wins; repository values are defaults.
 - `denied_commands` is **always re-merged** with the built-in deny-list — a committed config can only strengthen the deny-list, never weaken it.
+- The `.deepagents/` write-protection floor is always prepended, even when custom filesystem rules allow broader writes.
 - A missing or malformed file is ignored (a warning is logged); it never aborts a run.

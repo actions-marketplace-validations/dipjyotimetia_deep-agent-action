@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
-import { runAgentStream, type TodoItem } from "../src/agent/stream.js";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { runAgentStream, type StreamActivity, type TodoItem } from "../src/agent/stream.js";
 
 /** A fake agent whose stream yields the given "values"-mode state chunks. */
 function fakeAgent(chunks: unknown[]) {
@@ -74,6 +74,72 @@ describe("runAgentStream", () => {
     expect(result.todos).toEqual([{ content: "step 1", status: "completed" }]);
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.at(-1)).toEqual([{ content: "step 1", status: "completed" }]);
+  });
+
+  test("reports typed tool activity without duplicating streamed state", async () => {
+    const seen: StreamActivity[] = [];
+    const messages = [
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { name: "search_web", args: { query: "deepagents" }, id: "call-1" },
+          { name: "search_web", args: { query: "langgraph" }, id: "call-2" },
+        ],
+      }),
+      new ToolMessage({
+        content: "found it",
+        name: "search_web",
+        tool_call_id: "call-1",
+      }),
+      new ToolMessage({
+        content: "found that too",
+        name: "search_web",
+        tool_call_id: "call-2",
+      }),
+    ];
+    const result = await runAgentStream(
+      fakeAgent([{ messages: [messages[0]] }, { messages }, { messages }]),
+      {},
+      {
+        ...opts,
+        onActivity: (activity) => {
+          seen.push(activity);
+        },
+      },
+    );
+
+    expect(seen).toEqual([
+      { type: "tool_call", name: "search_web", namespace: [], id: "call-1" },
+      { type: "tool_call", name: "search_web", namespace: [], id: "call-2" },
+      { type: "tool_result", name: "search_web", namespace: [], id: "call-1" },
+      { type: "tool_result", name: "search_web", namespace: [], id: "call-2" },
+    ]);
+    expect(result.activities).toEqual(seen);
+  });
+
+  test("stops cleanly and returns pending tool requests from a HITL interrupt", async () => {
+    const result = await runAgentStream(
+      fakeAgent([
+        {
+          todos: [{ content: "publish the release", status: "in_progress" }],
+          messages: [new AIMessage("I am ready to publish it.")],
+          __interrupt__: [
+            {
+              value: {
+                actionRequests: [{ name: "publish_release", args: { tag: "v1.2.3" } }],
+              },
+            },
+          ],
+        },
+      ]),
+      {},
+      opts,
+    );
+
+    expect(result.stopped).toBe("interrupt");
+    expect(result.pendingInterrupts).toEqual([
+      { name: "publish_release", args: { tag: "v1.2.3" } },
+    ]);
   });
 
   const budget = { model: "anthropic:claude-sonnet-4-6", maxTotalTokens: 200 };

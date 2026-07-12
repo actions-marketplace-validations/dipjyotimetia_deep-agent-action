@@ -44,7 +44,8 @@ src/
   types.ts                 # Shared types
   agent/
     model.ts               # Multi-provider model factory  ← add providers here
-    createAgent.ts         # Assemble the Deep Agent (model + guardrails + tools)
+    createAgent.ts         # Assemble the Deep Agent (memory/skills + policy + guardrails + tools)
+    policy.ts              # Deepagents sources, profile, permission, and HITL policy validation
     prompt.ts              # System/user prompts (implement & review)
     stream.ts              # Run the agent, mirror progress to the comment
     shellGuard.ts          # Command allow/deny enforcement
@@ -114,7 +115,7 @@ How to run: **Actions → E2E Live Events Orchestrator → Run workflow**.
 
 ### Change inputs
 
-Inputs are declared in [`action.yml`](action.yml) and parsed in [`src/config.ts`](src/config.ts) (`loadConfig`). Keep the three in sync: `action.yml`, `loadConfig`, and the docs tables in `README.md` / `docs/configuration.md`.
+Inputs are declared in [`action.yml`](action.yml) and parsed in [`src/config.ts`](src/config.ts) (`loadConfig`). Keep the three in sync: `action.yml`, `loadConfig`, and the docs tables in `README.md` / `docs/configuration.md`. Deepagents policy inputs also have repository-default parsing in [`src/config/repoConfig.ts`](src/config/repoConfig.ts) and security-floor tests.
 
 ### Add a test
 

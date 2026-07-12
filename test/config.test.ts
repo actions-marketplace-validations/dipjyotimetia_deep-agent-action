@@ -117,3 +117,26 @@ describe("loadConfig recursion limit", () => {
     }
   });
 });
+
+describe("loadConfig deepagents policy", () => {
+  test("loads strict profile, permission, and interrupt JSON inputs", () => {
+    process.env.INPUT_HARNESS_PROFILE = JSON.stringify({
+      systemPromptSuffix: "Use the repository conventions.",
+    });
+    process.env.INPUT_FILESYSTEM_PERMISSIONS = JSON.stringify([
+      { operations: ["read"], paths: ["/src/**"] },
+    ]);
+    process.env.INPUT_INTERRUPT_ON = JSON.stringify({ publish_release: true });
+
+    try {
+      const config = loadConfig();
+      expect(config.harnessProfile?.systemPromptSuffix).toBe("Use the repository conventions.");
+      expect(config.filesystemPermissions).toEqual([{ operations: ["read"], paths: ["/src/**"] }]);
+      expect(config.interruptOn).toEqual({ publish_release: true });
+    } finally {
+      delete process.env.INPUT_HARNESS_PROFILE;
+      delete process.env.INPUT_FILESYSTEM_PERMISSIONS;
+      delete process.env.INPUT_INTERRUPT_ON;
+    }
+  });
+});

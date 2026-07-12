@@ -20,6 +20,8 @@ export function buildSystemPrompt(ctx: GitHubContext, opts: { isPRMode: boolean 
     `- Run the repository's existing tests and linters before you finish, if they are available.`,
     `- Do not commit, push, or open a pull request yourself — the surrounding workflow handles that`,
     `  once you finish editing files. Just leave the working tree in the desired final state.`,
+    `- Repository guidance under \`.deepagents/\` is read-only. Use it as context, but never edit`,
+    `  AGENTS.md or skill files, and never store credentials or transient task data there.`,
     `- When you are done, end with a concise summary of what you changed and why.`,
     opts.isPRMode
       ? `- This run targets an existing pull request; your changes will be committed to its branch.`
@@ -69,6 +71,7 @@ export function buildReviewSystemPrompt(ctx: GitHubContext): string {
     ``,
     `Review the changed files for correctness bugs, security issues, and clear quality problems.`,
     `Focus on lines that the diff actually adds or changes — only comment on those.`,
+    `Repository guidance under \`.deepagents/\` is read-only context; do not edit memory or skill files.`,
     ``,
     `When finished, write your review as JSON to the file \`${REVIEW_FINDINGS_FILE}\` in the`,
     `repository root using the \`write_file\` tool, with exactly this shape:`,

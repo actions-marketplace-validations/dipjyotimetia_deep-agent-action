@@ -12,6 +12,7 @@ export async function emitOutputs(record: RunRecord): Promise<void> {
   core.setOutput("branch", record.branch ?? "");
   core.setOutput("budget_stopped", record.stopReason === "budget" ? "true" : "false");
   core.setOutput("timed_out", record.stopReason === "timeout" ? "true" : "false");
+  core.setOutput("interrupted", record.stopReason === "interrupt" ? "true" : "false");
   core.setOutput("result_json", JSON.stringify(record));
 
   await writeSummary(record);

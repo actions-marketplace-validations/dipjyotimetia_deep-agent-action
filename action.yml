@@ -27,6 +27,21 @@ inputs:
   mcp_config:
     description: "MCP servers JSON: { \"mcpServers\": { name: { command, args, env } | { url } } }. Tools are exposed to the agent."
     required: false
+  harness_profile:
+    description: >-
+      Optional deepagents harness profile JSON. Supports systemPromptSuffix, toolDescriptionOverrides,
+      excludedTools, excludedMiddleware, and generalPurposeSubagent. Strictly validated before execution.
+    required: false
+  filesystem_permissions:
+    description: >-
+      Optional deepagents filesystem permission rules JSON. Each rule has operations (read/write), absolute
+      glob paths, and optional mode (allow/deny). Repository .deepagents memory/skills remain write-protected.
+    required: false
+  interrupt_on:
+    description: >-
+      Optional deepagents HITL interrupt policy JSON mapping tool names to true/false or an allowedDecisions
+      object. MCP tools require approval by default; an explicit false disables that default.
+    required: false
   allowed_permissions:
     description: "Comma-separated repository permission levels allowed to trigger the agent."
     required: false
@@ -133,7 +148,7 @@ inputs:
 
 outputs:
   status:
-    description: "Run outcome: success | skipped | refused | failed."
+    description: "Run outcome: success | skipped | refused | failed | interrupted."
     value: ${{ steps.agent.outputs.status }}
   pr_url:
     description: "URL of the opened pull request, if any."
@@ -147,6 +162,9 @@ outputs:
   timed_out:
     description: "'true' when the run was stopped early by max_runtime_minutes (partial work opened for review)."
     value: ${{ steps.agent.outputs.timed_out }}
+  interrupted:
+    description: "'true' when deepagents paused before a configured tool requiring approval."
+    value: ${{ steps.agent.outputs.interrupted }}
   result_json:
     description: "Machine-readable run record (plan, tool calls, files changed, outcome)."
     value: ${{ steps.agent.outputs.result_json }}
@@ -175,6 +193,9 @@ runs:
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_BASE_URL: ${{ inputs.base_url }}
         INPUT_MCP_CONFIG: ${{ inputs.mcp_config }}
+        INPUT_HARNESS_PROFILE: ${{ inputs.harness_profile }}
+        INPUT_FILESYSTEM_PERMISSIONS: ${{ inputs.filesystem_permissions }}
+        INPUT_INTERRUPT_ON: ${{ inputs.interrupt_on }}
         INPUT_ALLOWED_PERMISSIONS: ${{ inputs.allowed_permissions }}
         INPUT_ALLOWED_COMMANDS: ${{ inputs.allowed_commands }}
         INPUT_DENIED_COMMANDS: ${{ inputs.denied_commands }}
