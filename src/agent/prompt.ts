@@ -1,5 +1,5 @@
 import type { GitHubContext } from "../types.js";
-import { REVIEW_FINDINGS_FILE } from "../github/review.js";
+import { REVIEW_FINDINGS_PATH } from "../github/review.js";
 
 /**
  * Build the system prompt that sets the agent's role and conventions. The
@@ -13,6 +13,7 @@ export function buildSystemPrompt(ctx: GitHubContext, opts: { isPRMode: boolean 
     `and run shell commands via the \`execute\` tool. Your shell has no credentials or secrets, and`,
     `network-fetch commands (curl, wget, ssh, …) are blocked — do not attempt to push, fetch`,
     `remotes, or call external services.`,
+    `The command filter is a guardrail, not a sandbox: allowed commands run directly on the runner.`,
     ``,
     `Guidelines:`,
     `- Use the \`write_todos\` tool to plan multi-step work and keep the plan updated as you progress.`,
@@ -66,15 +67,15 @@ export function buildReviewSystemPrompt(ctx: GitHubContext): string {
   const repo = `${ctx.owner}/${ctx.repo}`;
   return [
     `You are a code reviewer for the GitHub repository ${repo}, reviewing a pull request.`,
-    `The repository is checked out at the current working directory and you can read files and`,
-    `run read-only shell commands via \`execute\`. Do NOT edit, commit, or push anything.`,
+    `The repository is checked out at the current working directory and you can read and search`,
+    `files. You cannot edit repository files or run shell commands.`,
     ``,
     `Review the changed files for correctness bugs, security issues, and clear quality problems.`,
     `Focus on lines that the diff actually adds or changes — only comment on those.`,
     `Repository guidance under \`.deepagents/\` is read-only context; do not edit memory or skill files.`,
     ``,
-    `When finished, write your review as JSON to the file \`${REVIEW_FINDINGS_FILE}\` in the`,
-    `repository root using the \`write_file\` tool, with exactly this shape:`,
+    `When finished, write your review as JSON to \`${REVIEW_FINDINGS_PATH}\` using the`,
+    `\`write_file\` tool. This is the only writable path. Use exactly this shape:`,
     `{ "summary": "<overall summary>", "findings": [ { "path": "<file>", "line": <number>, "body": "<comment>",`,
     `  "severity": "critical" | "warning" | "info", "suggestion": "<replacement code>" } ] }`,
     `\`severity\` is optional — set it when you can rank the finding, omit it otherwise.`,

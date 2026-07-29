@@ -73,7 +73,9 @@ export function parseHarnessProfileValue(value: unknown, name = "harness_profile
   try {
     const profile = parseHarnessProfileConfig(value);
     if (profile.excludedMiddleware.has("ShellGuardMiddleware")) {
-      throw new Error("ShellGuardMiddleware is protected and cannot be excluded.");
+      throw new Error(
+        "ShellGuardMiddleware is a protected legacy name; command policy is enforced by the backend and cannot be excluded.",
+      );
     }
     return profile;
   } catch (err) {
@@ -146,6 +148,22 @@ export function buildFilesystemPermissions(
   custom?: FilesystemPermission[],
 ): FilesystemPermission[] {
   return [{ operations: ["write"], paths: ["/.deepagents/**"], mode: "deny" }, ...(custom ?? [])];
+}
+
+/**
+ * Review agents may write only their structured handoff. The catch-all deny
+ * precedes repository policy because review mode must remain non-mutating even
+ * when a repository normally allows broad writes.
+ */
+export function buildReviewFilesystemPermissions(
+  custom?: FilesystemPermission[],
+): FilesystemPermission[] {
+  return [
+    { operations: ["write"], paths: ["/.deepagents/**"], mode: "deny" },
+    { operations: ["write"], paths: ["/review-output/**"], mode: "allow" },
+    { operations: ["write"], paths: ["/**"], mode: "deny" },
+    ...(custom ?? []),
+  ];
 }
 
 /** Interrupt all configured MCP tools by default, with explicit overrides. */

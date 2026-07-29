@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import type { Octokit } from "./client.js";
 import type { GitHubContext } from "../types.js";
@@ -60,8 +60,10 @@ const ReviewResultSchema = z.object({
   findings: z.array(FindingSchema).catch([]),
 });
 
-/** Path (relative to the workspace) the review agent writes its findings to. */
-export const REVIEW_FINDINGS_FILE = ".deep-agent-review.json";
+/** Virtual route and filename used for the review agent's isolated handoff. */
+export const REVIEW_OUTPUT_ROUTE = "/review-output";
+export const REVIEW_FINDINGS_FILE = "findings.json";
+export const REVIEW_FINDINGS_PATH = `${REVIEW_OUTPUT_ROUTE}/${REVIEW_FINDINGS_FILE}`;
 
 /** Fetch the changed files (with patches) for the PR under review. */
 export async function fetchPrFiles(
@@ -149,6 +151,7 @@ export function partitionApplicableFindings(findings: ReviewFinding[]): {
 export function applyReviewSuggestions(
   rootDir: string,
   findings: ReviewFinding[],
+  changedFiles: ReadonlySet<string>,
 ): { applied: ReviewFinding[]; unhandled: ReviewFinding[] } {
   const { applicable, unhandled } = partitionApplicableFindings(findings);
   const applied: ReviewFinding[] = [];
@@ -161,20 +164,67 @@ export function applyReviewSuggestions(
   }
 
   for (const [path, fileFindings] of byPath) {
-    const abs = join(rootDir, path);
-    if (!existsSync(abs)) {
+    const abs = resolveSafeChangedFile(rootDir, path, changedFiles);
+    if (!abs) {
       unhandled.push(...fileFindings);
       continue;
     }
     let text = readFileSync(abs, "utf8");
+    const originalLineCount = text.split("\n").length;
+    let changed = false;
     for (const f of [...fileFindings].sort((a, b) => b.line - a.line)) {
+      if (f.line > originalLineCount) {
+        unhandled.push(f);
+        continue;
+      }
       text = applySuggestion(text, f.line, f.suggestion!);
       applied.push(f);
+      changed = true;
     }
-    writeFileSync(abs, text, "utf8");
+    if (changed) writeFileSync(abs, text, "utf8");
   }
 
   return { applied, unhandled };
+}
+
+/**
+ * Resolve an agent-provided path only when it names an actual changed file
+ * contained by the checkout. Realpath containment also rejects escapes through
+ * symlinked parents; the final lstat rejects a symlink as the target itself.
+ */
+function resolveSafeChangedFile(
+  rootDir: string,
+  proposedPath: string,
+  changedFiles: ReadonlySet<string>,
+): string | undefined {
+  if (
+    !changedFiles.has(proposedPath) ||
+    isAbsolute(proposedPath) ||
+    proposedPath.includes("\\") ||
+    proposedPath === "." ||
+    posix.normalize(proposedPath) !== proposedPath
+  ) {
+    return undefined;
+  }
+
+  try {
+    const realRoot = realpathSync(rootDir);
+    const candidate = resolve(realRoot, proposedPath);
+    if (!isContained(realRoot, candidate)) return undefined;
+
+    const stat = lstatSync(candidate);
+    if (stat.isSymbolicLink() || !stat.isFile()) return undefined;
+
+    const realCandidate = realpathSync(candidate);
+    return isContained(realRoot, realCandidate) ? realCandidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isContained(rootDir: string, candidate: string): boolean {
+  const rel = relative(rootDir, candidate);
+  return rel !== "" && !rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel);
 }
 
 /**

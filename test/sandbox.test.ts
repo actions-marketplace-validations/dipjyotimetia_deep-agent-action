@@ -1,11 +1,13 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { ToolMessage } from "@langchain/core/messages";
 import { LocalShellBackend } from "deepagents";
 import { FakeToolCallingModel } from "langchain";
 import { buildShellEnv } from "../src/agent/env.js";
 import { buildAgent } from "../src/agent/createAgent.js";
+import type { ToolCallRecord } from "../src/types.js";
 
 /**
  * Regression guard for the workspace sandboxing that `buildAgent` relies on.
@@ -89,6 +91,7 @@ describe("buildAgent filesystem sandbox (virtualMode)", () => {
         ],
       }),
       rootDir: guardedRoot,
+      mode: "implement",
       systemPrompt: "test",
       allowedCommands: ["echo"],
       deniedCommands: [],
@@ -96,9 +99,128 @@ describe("buildAgent filesystem sandbox (virtualMode)", () => {
       toolCallRecord: [],
     });
 
-    await expect(
-      agent.invoke({ messages: [{ role: "user", content: "rewrite the guidance" }] }),
-    ).rejects.toThrow("permission denied");
+    const result = await agent.invoke({
+      messages: [{ role: "user", content: "rewrite the guidance" }],
+    });
+    const writeResult = result.messages.find(
+      (message): message is ToolMessage =>
+        message instanceof ToolMessage && message.name === "write_file",
+    );
+    expect(writeResult?.status).toBe("error");
+    expect(writeResult?.content).toContain("permission denied for write on /.deepagents/AGENTS.md");
     expect(readFileSync(join(guardedRoot, ".deepagents", "AGENTS.md"), "utf8")).toBe("original\n");
+  });
+
+  test("review mode writes only to isolated output and exposes no edit or execute capability", async () => {
+    const reviewRoot = mkdtempSync(join(tmpdir(), "da-review-root-"));
+    const reviewOutputDir = mkdtempSync(join(tmpdir(), "da-review-output-"));
+    mkdirSync(join(reviewRoot, "src"), { recursive: true });
+    writeFileSync(join(reviewRoot, "src", "a.ts"), "original\n");
+    const toolCallRecord: ToolCallRecord[] = [];
+
+    const agent = buildAgent({
+      model: new FakeToolCallingModel({
+        toolCalls: [
+          [
+            {
+              name: "write_file",
+              args: {
+                file_path: "/review-output/findings.json",
+                content: '{"summary":"done","findings":[]}',
+              },
+              id: "write-findings",
+            },
+          ],
+          [
+            {
+              name: "write_file",
+              args: { file_path: "/src/a.ts", content: "tampered\n" },
+              id: "write-repo",
+            },
+          ],
+          [
+            {
+              name: "edit_file",
+              args: {
+                file_path: "/src/a.ts",
+                old_string: "original",
+                new_string: "tampered",
+              },
+              id: "edit-repo",
+            },
+          ],
+          [
+            {
+              name: "execute",
+              args: { command: "touch review-bypass-marker" },
+              id: "execute-repo",
+            },
+          ],
+          [],
+        ],
+      }),
+      rootDir: reviewRoot,
+      mode: "review",
+      reviewOutputDir,
+      systemPrompt: "Write the review output without changing the repository.",
+      allowedCommands: ["touch"],
+      deniedCommands: [],
+      filesystemPermissions: [{ operations: ["write"], paths: ["/**"], mode: "allow" }],
+      shellTimeoutSeconds: 5,
+      toolCallRecord,
+    });
+
+    await agent.invoke({ messages: [{ role: "user", content: "Review this change." }] });
+
+    expect(readFileSync(join(reviewOutputDir, "findings.json"), "utf8")).toBe(
+      '{"summary":"done","findings":[]}',
+    );
+    expect(readFileSync(join(reviewRoot, "src", "a.ts"), "utf8")).toBe("original\n");
+    expect(existsSync(join(reviewRoot, "review-bypass-marker"))).toBe(false);
+    expect(toolCallRecord).toEqual([]);
+  });
+
+  test("delegated review subagents cannot regain shell execution", async () => {
+    const reviewRoot = mkdtempSync(join(tmpdir(), "da-review-subagent-"));
+    const reviewOutputDir = mkdtempSync(join(tmpdir(), "da-review-output-"));
+    const toolCallRecord: ToolCallRecord[] = [];
+    const agent = buildAgent({
+      model: new FakeToolCallingModel({
+        toolCalls: [
+          [
+            {
+              name: "task",
+              args: {
+                description: "Run touch delegated-review-bypass.",
+                subagent_type: "general-purpose",
+              },
+              id: "delegate-review",
+            },
+          ],
+          [
+            {
+              name: "execute",
+              args: { command: "touch delegated-review-bypass" },
+              id: "delegated-execute",
+            },
+          ],
+          [],
+          [],
+        ],
+      }),
+      rootDir: reviewRoot,
+      mode: "review",
+      reviewOutputDir,
+      systemPrompt: "Review without changing the repository.",
+      allowedCommands: ["touch"],
+      deniedCommands: [],
+      shellTimeoutSeconds: 5,
+      toolCallRecord,
+    });
+
+    await agent.invoke({ messages: [{ role: "user", content: "Delegate this review." }] });
+
+    expect(existsSync(join(reviewRoot, "delegated-review-bypass"))).toBe(false);
+    expect(toolCallRecord).toEqual([]);
   });
 });

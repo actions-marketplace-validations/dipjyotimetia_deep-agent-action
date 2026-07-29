@@ -168,7 +168,7 @@ The agent only acts when it is both **triggered** (a mention or explicit prompt)
 | Get a code review | A **pull request** | `@agent review` → posts inline comments |
 | Run unattended | **Actions tab** → *Run workflow* | provide a `prompt` input (no mention needed) |
 
-The agent enters **review mode** automatically when the instruction starts with `review` on a pull request; otherwise it implements.
+The agent enters **review mode** automatically when the instruction starts with `review` on a pull request; otherwise it implements. Review mode can read and search the checkout but has no shell or repository-edit tool. Its JSON handoff is written to isolated temporary storage outside the repository. When suggestions are applied, only non-symlink regular files from GitHub's changed-file list are eligible; unsafe findings remain comments.
 
 ## Models & providers
 
@@ -283,12 +283,12 @@ The agent runs untrusted, model-generated commands, so the action is defensive b
 - **Permission gating** — only human collaborators with `write`/`admin` (configurable) can trigger it; bot accounts are ignored to prevent loops.
 - **Fork-PR protection** — fork PRs are denied unless a maintainer applies the `fork_allow_label`.
 - **Secret-free shell** — the agent's shell sees an allow-listed, secret-free environment; provider keys and `GITHUB_TOKEN` are never exposed to it.
-- **Command guardrails** — an allow-list plus an always-on deny-list (network/privilege tools are blocked even if allow-listed).
+- **Command guardrails** — an allow-list plus an always-on deny-list (network/privilege tools are blocked even if allow-listed), enforced at the shared backend for the main agent and delegated subagents.
 - **Human-approval gate** — `require_push_approval: true` holds changes behind a draft PR or a proposed branch for review.
 - **Repository guidance boundary** — only `.deepagents/AGENTS.md` and `.deepagents/skills/` are loaded by deepagents; their built-in filesystem writes are denied, and issue/PR text remains separate untrusted data.
 - **Tool interrupts** — configured MCP tools can pause before execution; the action records the pending request and never pretends that an ephemeral runner can resume the paused graph.
 
-This is a guardrail model, not a sandbox — run it on the providers and repos you trust. See [docs/security.md](docs/security.md) for the full threat model, and [SECURITY.md](SECURITY.md) to report a vulnerability.
+This is a guardrail model, not a sandbox: allowed commands execute directly on the runner. Run it on the providers and repos you trust. See [docs/security.md](docs/security.md) for the full threat model, and [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Examples
 

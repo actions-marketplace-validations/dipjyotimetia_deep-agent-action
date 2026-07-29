@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -160,7 +160,7 @@ describe("applyReviewSuggestions", () => {
         { path: relPath, line: 1, body: "fix 1", suggestion: "LINE1" },
         { path: relPath, line: 3, body: "fix 3", suggestion: "LINE3" },
       ];
-      const { applied, unhandled } = applyReviewSuggestions(dir, findings);
+      const { applied, unhandled } = applyReviewSuggestions(dir, findings, new Set([relPath]));
       expect(applied).toHaveLength(2);
       expect(unhandled).toHaveLength(0);
       expect(readFileSync(join(dir, relPath), "utf8")).toBe("LINE1\nline2\nLINE3\n");
@@ -170,7 +170,11 @@ describe("applyReviewSuggestions", () => {
   test("moves findings for a missing file to unhandled instead of applying", () => {
     const dir = mkdtempSync(join(tmpdir(), "deep-agent-review-"));
     const findings = [{ path: "does/not/exist.ts", line: 1, body: "x", suggestion: "y" }];
-    const { applied, unhandled } = applyReviewSuggestions(dir, findings);
+    const { applied, unhandled } = applyReviewSuggestions(
+      dir,
+      findings,
+      new Set(["does/not/exist.ts"]),
+    );
     expect(applied).toHaveLength(0);
     expect(unhandled).toEqual(findings);
   });
@@ -178,8 +182,76 @@ describe("applyReviewSuggestions", () => {
   test("findings without a suggestion are always unhandled", () => {
     const dir = mkdtempSync(join(tmpdir(), "deep-agent-review-"));
     const findings = [{ path: "a.ts", line: 1, body: "x" }];
-    const { applied, unhandled } = applyReviewSuggestions(dir, findings);
+    const { applied, unhandled } = applyReviewSuggestions(dir, findings, new Set(["a.ts"]));
     expect(applied).toHaveLength(0);
     expect(unhandled).toEqual(findings);
+  });
+
+  test("keeps an out-of-range suggestion unhandled instead of reporting it as applied", () => {
+    withTempFile("only line\n", (dir, relPath) => {
+      const findings = [{ path: relPath, line: 8, body: "stale line", suggestion: "replacement" }];
+      const { applied, unhandled } = applyReviewSuggestions(dir, findings, new Set([relPath]));
+
+      expect(applied).toEqual([]);
+      expect(unhandled).toEqual(findings);
+      expect(readFileSync(join(dir, relPath), "utf8")).toBe("only line\n");
+    });
+  });
+
+  test("does not apply a suggestion to an existing file outside the PR changed-file set", () => {
+    withTempFile("original\n", (dir, relPath) => {
+      const findings = [{ path: relPath, line: 1, body: "x", suggestion: "tampered" }];
+      const { applied, unhandled } = applyReviewSuggestions(dir, findings, new Set(["src/b.ts"]));
+
+      expect(applied).toEqual([]);
+      expect(unhandled).toEqual(findings);
+      expect(readFileSync(join(dir, relPath), "utf8")).toBe("original\n");
+    });
+  });
+
+  test("rejects traversal and absolute paths even if they appear in the allow-set", () => {
+    const parent = mkdtempSync(join(tmpdir(), "deep-agent-review-parent-"));
+    const rootDir = join(parent, "repo");
+    mkdirSync(rootDir);
+    const outside = join(parent, "outside.ts");
+    writeFileSync(outside, "outside\n");
+    const findings = [
+      { path: "../outside.ts", line: 1, body: "traversal", suggestion: "tampered" },
+      { path: outside, line: 1, body: "absolute", suggestion: "tampered" },
+    ];
+
+    const { applied, unhandled } = applyReviewSuggestions(
+      rootDir,
+      findings,
+      new Set(findings.map((f) => f.path)),
+    );
+
+    expect(applied).toEqual([]);
+    expect(unhandled).toEqual(findings);
+    expect(readFileSync(outside, "utf8")).toBe("outside\n");
+  });
+
+  test("rejects symlinks and non-regular files", () => {
+    const parent = mkdtempSync(join(tmpdir(), "deep-agent-review-parent-"));
+    const rootDir = join(parent, "repo");
+    mkdirSync(join(rootDir, "src"), { recursive: true });
+    const outside = join(parent, "outside.ts");
+    writeFileSync(outside, "outside\n");
+    symlinkSync(outside, join(rootDir, "src", "link.ts"));
+    mkdirSync(join(rootDir, "src", "directory"));
+    const findings = [
+      { path: "src/link.ts", line: 1, body: "symlink", suggestion: "tampered" },
+      { path: "src/directory", line: 1, body: "directory", suggestion: "tampered" },
+    ];
+
+    const { applied, unhandled } = applyReviewSuggestions(
+      rootDir,
+      findings,
+      new Set(findings.map((f) => f.path)),
+    );
+
+    expect(applied).toEqual([]);
+    expect(unhandled).toEqual(findings);
+    expect(readFileSync(outside, "utf8")).toBe("outside\n");
   });
 });

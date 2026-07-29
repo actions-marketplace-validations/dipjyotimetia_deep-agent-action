@@ -18,6 +18,7 @@ describe("deepagents HITL integration", () => {
       model,
       modelSpec: "anthropic:test-model",
       rootDir: process.cwd(),
+      mode: "implement",
       systemPrompt: "test",
       allowedCommands: ["echo"],
       deniedCommands: [],

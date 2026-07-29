@@ -1,25 +1,28 @@
 import {
   CompositeBackend,
   createDeepAgent,
-  LocalShellBackend,
+  createFilesystemMiddleware,
+  FilesystemBackend,
   registerHarnessProfile,
   type FilesystemPermission,
+  type FsToolName,
   type HarnessProfile,
 } from "deepagents";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { DynamicStructuredTool } from "@langchain/core/tools";
 import { MemorySaver } from "@langchain/langgraph";
 import type { ToolCallRecord } from "../types.js";
-import { createShellGuard } from "./shellGuard.js";
+import { GuardedLocalShellBackend } from "./shellGuard.js";
 import { buildShellEnv } from "./env.js";
 import {
   buildFilesystemPermissions,
   buildInterruptPolicy,
+  buildReviewFilesystemPermissions,
   discoverDeepAgentSources,
 } from "./policy.js";
 import type { InterruptPolicy } from "./policy.js";
 
-export interface BuildAgentOptions {
+interface BuildAgentCommonOptions {
   model: BaseChatModel;
   rootDir: string;
   systemPrompt: string;
@@ -36,9 +39,20 @@ export interface BuildAgentOptions {
   interruptOn?: InterruptPolicy;
   /** Mutable sink the shell guard appends tool-call records to. */
   toolCallRecord: ToolCallRecord[];
-  /** Extra tools (e.g. from MCP servers) added alongside the built-in tools. */
-  extraTools?: DynamicStructuredTool[];
 }
+
+export type BuildAgentOptions = BuildAgentCommonOptions &
+  (
+    | {
+        mode: "implement";
+        /** Extra tools (e.g. from MCP servers) added alongside the built-in tools. */
+        extraTools?: DynamicStructuredTool[];
+      }
+    | {
+        mode: "review";
+        reviewOutputDir: string;
+      }
+  );
 
 export interface ResolveAgentPolicyOptions {
   rootDir: string;
@@ -80,7 +94,7 @@ export function resolveAgentPolicy(opts: ResolveAgentPolicyOptions): {
 /**
  * Assemble the in-runner Deep Agent: a LocalShellBackend rooted at the
  * workspace (which enables the built-in `execute` tool), an instantiated
- * model, and the command allow-list middleware.
+ * model, and backend-level command policy shared by delegated subagents.
  */
 export function buildAgent(opts: BuildAgentOptions) {
   // Sandbox the built-in filesystem tools (ls/glob/grep/read/edit) to the
@@ -93,19 +107,20 @@ export function buildAgent(opts: BuildAgentOptions) {
   // resolving outside the root is returned empty/error to the model instead of
   // reaching the filesystem. The `execute` (shell) tool is NOT affected — it
   // keeps full system access, gated by the command allow/deny list.
-  const shellBackend = new LocalShellBackend({
-    rootDir: opts.rootDir,
-    virtualMode: true,
-    env: buildShellEnv(),
-    timeout: opts.shellTimeoutSeconds,
-    maxOutputBytes: 200_000,
-  });
-
-  const shellGuard = createShellGuard({
-    allowed: opts.allowedCommands,
-    denied: opts.deniedCommands,
-    record: opts.toolCallRecord,
-  });
+  const shellBackend = new GuardedLocalShellBackend(
+    {
+      rootDir: opts.rootDir,
+      virtualMode: true,
+      env: buildShellEnv(),
+      timeout: opts.shellTimeoutSeconds,
+      maxOutputBytes: 200_000,
+    },
+    {
+      allowed: opts.allowedCommands,
+      denied: opts.deniedCommands,
+      record: opts.toolCallRecord,
+    },
+  );
 
   if (opts.harnessProfile) {
     const profileKeys = new Set<string>();
@@ -141,26 +156,49 @@ export function buildAgent(opts: BuildAgentOptions) {
 
   const policy = resolveAgentPolicy({
     rootDir: opts.rootDir,
-    mcpToolNames: (opts.extraTools ?? []).map((tool) => tool.name),
+    mcpToolNames: (opts.mode === "implement" ? (opts.extraTools ?? []) : []).map(
+      (tool) => tool.name,
+    ),
     filesystemPermissions: opts.filesystemPermissions,
     interruptOn: opts.interruptOn,
   });
+
+  const permissions =
+    opts.mode === "review"
+      ? buildReviewFilesystemPermissions(opts.filesystemPermissions)
+      : policy.permissions;
 
   // deepagents rejects filesystem permissions on a raw shell backend because
   // shell commands can bypass path rules. A root composite route makes the
   // permission scope explicit while keeping execute delegated to the same
   // LocalShellBackend (and preserving virtualMode path containment).
-  const backend = new CompositeBackend(shellBackend, { "/": shellBackend });
+  const routes: Record<string, GuardedLocalShellBackend | FilesystemBackend> = {
+    "/": shellBackend,
+  };
+  if (opts.mode === "review") {
+    routes["/review-output/"] = new FilesystemBackend({
+      rootDir: opts.reviewOutputDir,
+      virtualMode: true,
+    });
+  }
+  const backend = new CompositeBackend(shellBackend, routes);
+  const filesystemTools: readonly FsToolName[] | "all" =
+    opts.mode === "review" ? ["ls", "read_file", "write_file", "glob", "grep"] : "all";
 
   return createDeepAgent({
     model: opts.model,
     backend,
-    systemPrompt: opts.systemPrompt,
-    middleware: [shellGuard],
-    tools: opts.extraTools ?? [],
+    systemPrompt: { prefix: opts.systemPrompt },
+    middleware: [
+      createFilesystemMiddleware({
+        backend,
+        permissions,
+        tools: filesystemTools,
+      }),
+    ],
+    tools: opts.mode === "implement" ? (opts.extraTools ?? []) : [],
     memory: policy.memory,
     skills: policy.skills,
-    permissions: policy.permissions,
     interruptOn: policy.interruptOn,
     // LangGraph's interrupt primitive requires a checkpointer even when the
     // workflow intentionally does not support cross-run resume. A fresh

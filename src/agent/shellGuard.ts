@@ -1,5 +1,4 @@
-import { createMiddleware } from "langchain";
-import { ToolMessage } from "@langchain/core/messages";
+import { LocalShellBackend, type ExecuteResponse, type LocalShellBackendOptions } from "deepagents";
 import type { ToolCallRecord } from "../types.js";
 
 /** Strip a leading directory path, leaving the executable basename. */
@@ -78,39 +77,41 @@ export function evaluateCommand(
   return { allowed: true };
 }
 
-/**
- * Middleware that intercepts the built-in `execute` tool and enforces the
- * command allow/deny lists. Blocked commands are short-circuited (the handler
- * is never called) and recorded into `record`.
- */
-export function createShellGuard(opts: {
+export interface ShellGuardOptions {
   allowed: string[];
   denied: string[];
   record: ToolCallRecord[];
-}) {
-  return createMiddleware({
-    name: "ShellGuardMiddleware",
-    wrapToolCall: async (request, handler) => {
-      const { toolCall } = request;
-      if (toolCall.name === "execute") {
-        const command = String((toolCall.args as { command?: unknown })?.command ?? "");
-        const verdict = evaluateCommand(command, opts.allowed, opts.denied);
-        opts.record.push({
-          name: "execute",
-          args: { command },
-          blocked: !verdict.allowed,
-          reason: verdict.reason,
-        });
-        if (!verdict.allowed) {
-          return new ToolMessage({
-            tool_call_id: toolCall.id ?? "",
-            name: "execute",
-            status: "error",
-            content: `Command blocked by policy: ${verdict.reason} The command was not executed.`,
-          });
-        }
-      }
-      return handler(request);
-    },
-  });
+}
+
+/**
+ * Local shell backend that enforces and audits command policy at the execution
+ * boundary shared by the main agent and every delegated subagent.
+ */
+export class GuardedLocalShellBackend extends LocalShellBackend {
+  constructor(
+    backendOptions: LocalShellBackendOptions,
+    private readonly guardOptions: ShellGuardOptions,
+  ) {
+    super(backendOptions);
+  }
+
+  override async execute(command: string): Promise<ExecuteResponse> {
+    const verdict = evaluateCommand(command, this.guardOptions.allowed, this.guardOptions.denied);
+    this.guardOptions.record.push({
+      name: "execute",
+      args: { command },
+      blocked: !verdict.allowed,
+      reason: verdict.reason,
+    });
+
+    if (!verdict.allowed) {
+      return {
+        output: `Command blocked by policy: ${verdict.reason} The command was not executed.`,
+        exitCode: 126,
+        truncated: false,
+      };
+    }
+
+    return super.execute(command);
+  }
 }
