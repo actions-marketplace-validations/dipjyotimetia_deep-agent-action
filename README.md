@@ -249,9 +249,10 @@ All inputs are optional.
 | `budget_stopped` | `true` when a cost/token cap stopped the run early (partial work opened for review). |
 | `timed_out` | `true` when `max_runtime_minutes` stopped the run early (partial work opened for review). |
 | `interrupted` | `true` when deepagents paused before a configured tool requiring approval. |
+| `audit_artifact` | Invocation-unique name of the uploaded audit-record artifact. |
 | `result_json` | Machine-readable run record (plan, files changed, tokens, cost, outcome). |
 
-Every run also writes a job summary and uploads a `deep-agent-run` artifact (`deep-agent-run.json`) as an audit record.
+Every run also writes a job summary and uploads an invocation-scoped `deep-agent-run-<uuid>` artifact as an audit record. Its exact name is exposed through the `audit_artifact` output, so parallel jobs, matrix jobs, and repeated action steps cannot replace each other's records.
 
 ## Per-repo configuration
 

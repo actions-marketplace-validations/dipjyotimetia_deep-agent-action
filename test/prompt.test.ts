@@ -1,7 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { buildUserMessage, buildReviewUserMessage } from "../src/agent/prompt.js";
+import {
+  buildSystemPrompt,
+  buildUserMessage,
+  buildReviewUserMessage,
+} from "../src/agent/prompt.js";
 import { fetchThread } from "../src/github/thread.js";
 import { makeContext } from "./mockContext.js";
+
+describe("buildSystemPrompt", () => {
+  test("tells implement agents to use absolute virtual paths for filesystem tools", () => {
+    const prompt = buildSystemPrompt(makeContext(), { isPRMode: false });
+
+    expect(prompt).toContain("absolute virtual paths");
+    expect(prompt).toContain("`/src/example.ts`");
+  });
+});
 
 describe("buildUserMessage", () => {
   const ctx = makeContext({ entityNumber: 442, isPR: false });

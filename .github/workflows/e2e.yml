@@ -17,7 +17,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  issues: write
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -64,7 +63,7 @@ jobs:
         uses: ./
         with:
           model: ${{ env.E2E_MODEL }}
-          prompt: "Create a file demo/E2E_HELLO.md containing a single short greeting line. Do not modify any other files."
+          prompt: "Create /demo/E2E_HELLO.md containing a single short greeting line. Do not modify any other files."
         env:
           PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
 
@@ -82,11 +81,11 @@ jobs:
       - name: Download audit artifact
         uses: actions/download-artifact@v8
         with:
-          name: deep-agent-run
+          name: ${{ steps.agent.outputs.audit_artifact }}
           path: ./artifact
 
       - name: Validate audit artifact
-        run: EXPECT_STATUS=success bun run scripts/e2e/assert-result.ts ./artifact/deep-agent-run.json
+        run: EXPECT_STATUS=success bun run scripts/e2e/assert-result.ts "./artifact/${{ steps.agent.outputs.audit_artifact }}.json"
 
       - name: Cleanup (close PR + delete branch)
         if: always() && steps.agent.outputs.pr_url != ''
@@ -96,9 +95,8 @@ jobs:
         run: gh pr close "$PR_URL" --delete-branch || true
 
   # Feature: human-in-the-loop gate -> change lands as a DRAFT PR.
-  # Runs after `implement`: both use the same dispatch branch name (derived from
-  # github.run_id) and upload the same audit-artifact name, so they must not run
-  # concurrently. Serializing also lets `implement` claim its artifact first.
+  # Runs after `implement` to keep the live model calls and GitHub mutations
+  # deterministic; branches and audit artifacts are isolated per invocation.
   approval-gate:
     needs: [preflight, implement]
     if: needs.preflight.outputs.has_key == 'true'
@@ -117,7 +115,7 @@ jobs:
         with:
           model: ${{ env.E2E_MODEL }}
           require_push_approval: "true"
-          prompt: "Create a file demo/E2E_APPROVAL.md with a single short line. Do not modify any other files."
+          prompt: "Create /demo/E2E_APPROVAL.md with a single short line. Do not modify any other files."
         env:
           PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
 
@@ -148,7 +146,7 @@ jobs:
   # the callback meter + AbortSignal actually fire end-to-end through the
   # deepagents/LangGraph stack. If any partial work was committed before the
   # abort, the forced-approval path must land it as a DRAFT.
-  # Serialized after the others (shared run_id branch name + audit-artifact name).
+  # Serialized after the others to keep the live model calls deterministic.
   budget-cap:
     needs: [preflight, approval-gate]
     if: needs.preflight.outputs.has_key == 'true'
@@ -169,7 +167,7 @@ jobs:
           # A cap below a single model call's token count guarantees the run trips
           # on the first response, exercising the abort path deterministically.
           max_total_tokens: "50"
-          prompt: "Create a file demo/E2E_BUDGET.md with a single short line. Do not modify any other files."
+          prompt: "Create /demo/E2E_BUDGET.md with a single short line. Do not modify any other files."
         env:
           PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
 

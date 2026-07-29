@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   sanitizeBranchName,
   generateBranchName,
+  buildRunBranchSuffix,
   explainGitHubError,
   buildPrBody,
   reuseExistingPr,
@@ -35,6 +36,38 @@ describe("generateBranchName", () => {
   });
 });
 
+describe("buildRunBranchSuffix", () => {
+  test("uses the composite action invocation id to isolate matrix copies", () => {
+    expect(
+      buildRunBranchSuffix({
+        DEEP_AGENT_INVOCATION_ID: "6b354af1-9d47-4aa1-b2d0-b60f6bc242f4",
+        GITHUB_RUN_ID: "30462463978",
+        GITHUB_JOB: "matrix-job",
+        GITHUB_ACTION: "agent",
+      }),
+    ).toBe("6b354af1-9d47-4aa1-b2d0-b60f6bc242f4");
+  });
+
+  test("separates action invocations within the same workflow run", () => {
+    expect(
+      buildRunBranchSuffix({
+        GITHUB_RUN_ID: "30462463978",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_JOB: "implement",
+        GITHUB_ACTION: "agent",
+      }),
+    ).toBe("30462463978-1-implement-agent");
+    expect(
+      buildRunBranchSuffix({
+        GITHUB_RUN_ID: "30462463978",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_JOB: "approval-gate",
+        GITHUB_ACTION: "agent",
+      }),
+    ).toBe("30462463978-1-approval-gate-agent");
+  });
+});
+
 describe("buildPrBody", () => {
   test("references the issue number when present", () => {
     const ctx = makeContext({ entityNumber: 12 });
@@ -56,6 +89,22 @@ describe("reuseExistingPr", () => {
     expect(await reuseExistingPr(octokit, ctx, "deep-agent/issue-12")).toBeUndefined();
   });
 
+  test("does not hide a PR lookup failure during landing", async () => {
+    const octokit = {
+      rest: {
+        pulls: {
+          list: async () => {
+            throw new Error("GitHub API unavailable");
+          },
+        },
+      },
+    } as any;
+
+    await expect(reuseExistingPr(octokit, ctx, "deep-agent/issue-12")).rejects.toThrow(
+      "GitHub API unavailable",
+    );
+  });
+
   test("reuses an open PR without reopening it", async () => {
     let updated = false;
     const octokit = {
@@ -70,10 +119,73 @@ describe("reuseExistingPr", () => {
         },
       },
     } as any;
-    expect(await reuseExistingPr(octokit, ctx, "deep-agent/issue-12")).toBe(
-      "https://github.com/x/1",
-    );
+    expect(await reuseExistingPr(octokit, ctx, "deep-agent/issue-12")).toEqual({
+      url: "https://github.com/x/1",
+      isDraft: false,
+    });
     expect(updated).toBe(false);
+  });
+
+  test("converts a reused ready PR to draft when approval is required", async () => {
+    let convertedWith: unknown;
+    const octokit = {
+      rest: {
+        pulls: {
+          list: async () => ({
+            data: [
+              {
+                number: 7,
+                node_id: "PR_kwDOExample",
+                state: "open",
+                draft: false,
+                merged_at: null,
+                html_url: "https://github.com/x/7",
+              },
+            ],
+          }),
+        },
+      },
+      graphql: async (_query: string, variables: unknown) => {
+        convertedWith = variables;
+        return { convertPullRequestToDraft: { pullRequest: { isDraft: true } } };
+      },
+    } as any;
+
+    expect(
+      await reuseExistingPr(octokit, ctx, "deep-agent/issue-12", { requireDraft: true }),
+    ).toEqual({
+      url: "https://github.com/x/7",
+      isDraft: true,
+    });
+    expect(convertedWith).toEqual({ pullRequestId: "PR_kwDOExample" });
+  });
+
+  test("reports an existing draft PR as still approval-pending", async () => {
+    const octokit = {
+      rest: {
+        pulls: {
+          list: async () => ({
+            data: [
+              {
+                number: 7,
+                state: "open",
+                draft: true,
+                merged_at: null,
+                html_url: "https://github.com/x/7",
+              },
+            ],
+          }),
+        },
+      },
+      graphql: async () => {
+        throw new Error("draft PR must not be converted again");
+      },
+    } as any;
+
+    expect(await reuseExistingPr(octokit, ctx, "deep-agent/issue-12")).toEqual({
+      url: "https://github.com/x/7",
+      isDraft: true,
+    });
   });
 
   test("reopens a closed (non-merged) PR and reuses it", async () => {
@@ -92,9 +204,10 @@ describe("reuseExistingPr", () => {
         },
       },
     } as any;
-    expect(await reuseExistingPr(octokit, ctx, "deep-agent/issue-12")).toBe(
-      "https://github.com/x/7",
-    );
+    expect(await reuseExistingPr(octokit, ctx, "deep-agent/issue-12")).toEqual({
+      url: "https://github.com/x/7",
+      isDraft: false,
+    });
     expect(reopenedWith).toEqual({
       owner: "acme",
       repo: "widgets",

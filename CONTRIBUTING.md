@@ -77,7 +77,7 @@ Two layers:
 
 | Job | Verifies |
 |---|---|
-| `implement` | `workflow_dispatch` + prompt opens a real PR; `status=success`; `result_json` and the `deep-agent-run` artifact are well-formed. |
+| `implement` | `workflow_dispatch` + prompt opens a real PR; `status=success`; `result_json` and the invocation-scoped audit artifact are well-formed. |
 | `approval-gate` | `require_push_approval: true` lands the change as a **draft** PR with `approvalPending`. |
 | `budget-cap` | A tiny `max_total_tokens` aborts the run mid-flight; `budget_stopped=true`, and any partial work lands as a draft PR. |
 

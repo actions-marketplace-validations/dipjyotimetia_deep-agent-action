@@ -77,6 +77,16 @@ export function sanitizeBranchName(name: string): string {
     .slice(0, 240);
 }
 
+/** Build the run-scoped suffix used when no issue or PR identifies the branch. */
+export function buildRunBranchSuffix(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.DEEP_AGENT_INVOCATION_ID) {
+    return env.DEEP_AGENT_INVOCATION_ID;
+  }
+  return [env.GITHUB_RUN_ID || "run", env.GITHUB_RUN_ATTEMPT, env.GITHUB_JOB, env.GITHUB_ACTION]
+    .filter((part): part is string => Boolean(part))
+    .join("-");
+}
+
 /**
  * Build a branch name for issue/dispatch runs. Stable per issue (e.g.
  * `deep-agent/issue-12`) so a follow-up mention reuses the same branch/PR
@@ -176,25 +186,56 @@ export function buildPrBody(ctx: GitHubContext, instruction: string): string {
 /**
  * Look for an existing (non-merged) PR whose head is `branch` and reuse it —
  * reopening it first if it was closed — instead of opening a second PR for
- * the same issue across separate mentions. Returns its URL when reused,
- * undefined when the caller should create a new PR.
+ * the same issue across separate mentions. When approval is required, convert
+ * a ready PR to draft before reporting it as gated. Returns the URL and actual
+ * draft state when reused, or undefined when the caller should create a new PR.
  */
+export interface ReusedPullRequest {
+  url: string;
+  isDraft: boolean;
+}
+
+const CONVERT_PULL_REQUEST_TO_DRAFT = `
+  mutation($pullRequestId: ID!) {
+    convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {
+      pullRequest { isDraft }
+    }
+  }
+`;
+
 export async function reuseExistingPr(
   octokit: Octokit,
   ctx: GitHubContext,
   branch: string,
-): Promise<string | undefined> {
+  opts: { requireDraft?: boolean } = {},
+): Promise<ReusedPullRequest | undefined> {
   const existing = await octokit.rest.pulls
     .list({ owner: ctx.owner, repo: ctx.repo, head: `${ctx.owner}:${branch}`, state: "all" })
-    .then((res) => res.data.find((p) => !p.merged_at))
-    .catch(() => undefined);
+    .then((res) => res.data.find((p) => !p.merged_at));
   if (!existing) return undefined;
   if (existing.state === "closed") {
-    await octokit.rest.pulls
-      .update({ owner: ctx.owner, repo: ctx.repo, pull_number: existing.number, state: "open" })
-      .catch(() => {});
+    await octokit.rest.pulls.update({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      pull_number: existing.number,
+      state: "open",
+    });
   }
-  return existing.html_url;
+
+  let isDraft = Boolean(existing.draft);
+  if (opts.requireDraft && !isDraft) {
+    if (!existing.node_id) {
+      throw new Error(`Cannot convert pull request #${existing.number} to draft: missing node id.`);
+    }
+    const converted = await octokit.graphql<{
+      convertPullRequestToDraft: { pullRequest: { isDraft: boolean } };
+    }>(CONVERT_PULL_REQUEST_TO_DRAFT, { pullRequestId: existing.node_id });
+    isDraft = converted.convertPullRequestToDraft.pullRequest.isDraft;
+    if (!isDraft) {
+      throw new Error(`GitHub did not convert pull request #${existing.number} to draft.`);
+    }
+  }
+  return { url: existing.html_url, isDraft };
 }
 
 export interface LandResult {
@@ -294,9 +335,16 @@ export async function landChanges(params: {
 
   // Reuse an existing (non-merged) PR for this branch instead of opening a
   // second one for the same issue.
-  const reusedPrUrl = await reuseExistingPr(octokit, ctx, branch);
-  if (reusedPrUrl) {
-    return { filesChanged, branch, prUrl: reusedPrUrl, approvalPending: params.requireApproval };
+  const reusedPr = await reuseExistingPr(octokit, ctx, branch, {
+    requireDraft: params.requireApproval,
+  });
+  if (reusedPr) {
+    return {
+      filesChanged,
+      branch,
+      prUrl: reusedPr.url,
+      approvalPending: reusedPr.isDraft,
+    };
   }
 
   const pr = await octokit.rest.pulls

@@ -262,9 +262,16 @@ export async function landChangesVerified(params: {
     deletions: changeset.deletions,
   });
 
-  const reusedPrUrl = await reuseExistingPr(octokit, ctx, branch);
-  if (reusedPrUrl) {
-    return { filesChanged, branch, prUrl: reusedPrUrl, approvalPending: params.requireApproval };
+  const reusedPr = await reuseExistingPr(octokit, ctx, branch, {
+    requireDraft: params.requireApproval,
+  });
+  if (reusedPr) {
+    return {
+      filesChanged,
+      branch,
+      prUrl: reusedPr.url,
+      approvalPending: reusedPr.isDraft,
+    };
   }
 
   const pr = await octokit.rest.pulls

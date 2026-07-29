@@ -25,7 +25,7 @@ inputs:
     description: "Endpoint URL for the 'openai-compatible' provider (Groq, xAI, DeepSeek, Together, Ollama, vLLM, …)."
     required: false
   mcp_config:
-    description: "MCP servers JSON: { \"mcpServers\": { name: { command, args, env } | { url } } }. Tools are exposed to the agent."
+    description: 'MCP servers JSON: { "mcpServers": { name: { command, args, env } | { url } } }. Tools are exposed to the agent.'
     required: false
   harness_profile:
     description: >-
@@ -165,6 +165,9 @@ outputs:
   interrupted:
     description: "'true' when deepagents paused before a configured tool requiring approval."
     value: ${{ steps.agent.outputs.interrupted }}
+  audit_artifact:
+    description: "Invocation-unique name of the uploaded audit-record artifact."
+    value: ${{ steps.audit.outputs.artifact_name }}
   result_json:
     description: "Machine-readable run record (plan, tool calls, files changed, outcome)."
     value: ${{ steps.agent.outputs.result_json }}
@@ -178,16 +181,27 @@ runs:
         bun-version: "1.3.14"
         token: ${{ inputs.github_token || github.token }}
 
+    - name: Initialize audit record
+      id: audit
+      shell: bash
+      run: |
+        audit_id="$(bun -e 'console.log(crypto.randomUUID())')"
+        echo "audit_id=${audit_id}" >> "$GITHUB_OUTPUT"
+        echo "artifact_name=deep-agent-run-${audit_id}" >> "$GITHUB_OUTPUT"
+        echo "audit_path=${RUNNER_TEMP}/deep-agent-run-${audit_id}.json" >> "$GITHUB_OUTPUT"
+
     - name: Install action dependencies
       shell: bash
       working-directory: ${{ github.action_path }}
-      run: bun install --production
+      run: bun install --production --frozen-lockfile
 
     - name: Run Deep Agent
       id: agent
       shell: bash
       run: bun run "${{ github.action_path }}/src/index.ts"
       env:
+        DEEP_AGENT_AUDIT_PATH: ${{ steps.audit.outputs.audit_path }}
+        DEEP_AGENT_INVOCATION_ID: ${{ steps.audit.outputs.audit_id }}
         INPUT_TRIGGER_PHRASE: ${{ inputs.trigger_phrase }}
         INPUT_PROMPT: ${{ inputs.prompt }}
         INPUT_MODEL: ${{ inputs.model }}
@@ -223,15 +237,13 @@ runs:
         INPUT_LANGGRAPH_URL: ${{ inputs.langgraph_url }}
         INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}
 
-    # Publish the audit record written by the agent. Must be its own JS action
-    # step: ACTIONS_RUNTIME_TOKEN isn't exposed to composite `run:` steps, so an
-    # in-process upload can't authenticate. `overwrite` handles the same-name
-    # collision when several jobs in one run each invoke the action.
+    # Publish the audit record written by this invocation. The UUID suffix
+    # prevents parallel or matrix jobs and repeated action steps from replacing
+    # each other's immutable artifacts.
     - name: Upload audit record
       if: always()
       uses: actions/upload-artifact@v7
       with:
-        name: deep-agent-run
-        path: ${{ runner.temp }}/deep-agent-run.json
+        name: ${{ steps.audit.outputs.artifact_name }}
+        path: ${{ steps.audit.outputs.audit_path }}
         if-no-files-found: ignore
-        overwrite: true

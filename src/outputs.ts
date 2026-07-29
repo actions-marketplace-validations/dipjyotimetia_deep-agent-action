@@ -5,6 +5,25 @@ import { join } from "node:path";
 import { STOP_LABELS } from "./github/comments.js";
 import type { RunRecord } from "./types.js";
 
+/** Resolve the per-invocation audit path supplied by the composite action. */
+export function resolveAuditRecordPath(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.DEEP_AGENT_AUDIT_PATH) return env.DEEP_AGENT_AUDIT_PATH;
+  return join(env.RUNNER_TEMP || tmpdir(), "deep-agent-run.json");
+}
+
+/** Build a valid output record when orchestration fails before agent setup. */
+export function buildFailureRecord(error: string, model: string): RunRecord {
+  return {
+    status: "failed",
+    mode: "noop",
+    model: model || "unknown",
+    plan: [],
+    toolCalls: [],
+    filesChanged: [],
+    error,
+  };
+}
+
 /** Emit Action outputs, a run summary, and the retained audit record file. */
 export async function emitOutputs(record: RunRecord): Promise<void> {
   core.setOutput("status", record.status);
@@ -60,9 +79,7 @@ async function writeSummary(record: RunRecord): Promise<void> {
 // only a JS action step (upload-artifact) can authenticate to the artifact API.
 function writeAuditRecord(record: RunRecord): void {
   try {
-    const dir = process.env.RUNNER_TEMP || tmpdir();
-    const file = join(dir, "deep-agent-run.json");
-    writeFileSync(file, JSON.stringify(record, null, 2), "utf8");
+    writeFileSync(resolveAuditRecordPath(), JSON.stringify(record, null, 2), "utf8");
   } catch {
     // Best-effort; never fail the run over the audit record file.
   }

@@ -118,6 +118,21 @@ describe("loadConfig recursion limit", () => {
   });
 });
 
+describe("loadConfig runner timing inputs", () => {
+  test("rejects non-positive or fractional shell timeouts and comment debounce values", () => {
+    process.env.INPUT_SHELL_TIMEOUT_SECONDS = "-1";
+    expect(() => loadConfig()).toThrow("shell_timeout_seconds");
+    delete process.env.INPUT_SHELL_TIMEOUT_SECONDS;
+
+    process.env.INPUT_COMMENT_DEBOUNCE_MS = "1.5";
+    try {
+      expect(() => loadConfig()).toThrow("comment_debounce_ms");
+    } finally {
+      delete process.env.INPUT_COMMENT_DEBOUNCE_MS;
+    }
+  });
+});
+
 describe("loadConfig deepagents policy", () => {
   test("loads strict profile, permission, and interrupt JSON inputs", () => {
     process.env.INPUT_HARNESS_PROFILE = JSON.stringify({

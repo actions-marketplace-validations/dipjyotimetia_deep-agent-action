@@ -165,8 +165,10 @@ export function loadConfig(): Config {
     harnessProfile: parseHarnessProfile(core.getInput("harness_profile")),
     filesystemPermissions: parseFilesystemPermissions(core.getInput("filesystem_permissions")),
     interruptOn: parseInterruptPolicy(core.getInput("interrupt_on")),
-    shellTimeoutSeconds: Number(core.getInput("shell_timeout_seconds")) || 600,
-    commentDebounceMs: Number(core.getInput("comment_debounce_ms")) || 8000,
+    shellTimeoutSeconds:
+      parsePositiveInteger(core.getInput("shell_timeout_seconds"), "shell_timeout_seconds") ?? 600,
+    commentDebounceMs:
+      parsePositiveInteger(core.getInput("comment_debounce_ms"), "comment_debounce_ms") ?? 8000,
     maxCostUsd: parsePositiveNumber(core.getInput("max_cost_usd"), "max_cost_usd"),
     maxTotalTokens: parsePositiveNumber(core.getInput("max_total_tokens"), "max_total_tokens"),
     maxRuntimeMinutes: parsePositiveNumber(

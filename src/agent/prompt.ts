@@ -17,6 +17,8 @@ export function buildSystemPrompt(ctx: GitHubContext, opts: { isPRMode: boolean 
     ``,
     `Guidelines:`,
     `- Use the \`write_todos\` tool to plan multi-step work and keep the plan updated as you progress.`,
+    `- Filesystem tools require absolute virtual paths rooted at the repository, such as`,
+    `  \`/src/example.ts\`. Shell commands still use normal workspace-relative paths.`,
     `- Make the smallest change that satisfies the request. Match the existing code style.`,
     `- Run the repository's existing tests and linters before you finish, if they are available.`,
     `- Do not commit, push, or open a pull request yourself — the surrounding workflow handles that`,

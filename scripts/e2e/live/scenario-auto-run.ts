@@ -30,8 +30,8 @@ async function main(): Promise<void> {
   const issue = await createSyntheticIssue({
     title: `[E2E] Label auto-run scenario ${suffix}`,
     body:
-      `Use the write_file tool to create an empty file named "${markerFile}" — a relative ` +
-      "path from the repository root, not an absolute filesystem path.",
+      `Use the write_file tool to create an empty file named "/${markerFile}" — an absolute ` +
+      "virtual path rooted at the repository.",
   });
   writeOutput("issue_number", String(issue.number));
   console.log(`Created issue ${issue.url}`);

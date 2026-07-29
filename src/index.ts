@@ -49,6 +49,7 @@ import { estimateCostUsd } from "./agent/cost.js";
 import {
   checkoutPrHead,
   checkoutIssueBranchIfExists,
+  buildRunBranchSuffix,
   generateBranchName,
   getCurrentBranch,
   landChanges,
@@ -63,7 +64,7 @@ import {
   postReview,
   REVIEW_FINDINGS_FILE,
 } from "./github/review.js";
-import { emitOutputs } from "./outputs.js";
+import { buildFailureRecord, emitOutputs } from "./outputs.js";
 import type { Config, GitHubContext, Mode, RunRecord, TokenUsage } from "./types.js";
 
 function runUrl(ctx: GitHubContext): string {
@@ -308,7 +309,7 @@ async function run(): Promise<void> {
   }
 
   const url = runUrl(ctx);
-  const branchSuffix = process.env.GITHUB_RUN_ID || "run";
+  const branchSuffix = buildRunBranchSuffix();
 
   // P0-5 + M2: acknowledge, find the existing tracking comment, and load any MCP
   // tools — all independent, so run them together. We find (not yet upsert) the
@@ -878,7 +879,10 @@ async function refuse(
   await emitOutputs(record);
 }
 
-run().catch((err) => {
+run().catch(async (err) => {
   const message = err instanceof Error ? err.message : String(err);
+  await emitOutputs(buildFailureRecord(message, core.getInput("model") || "unknown")).catch(
+    () => {},
+  );
   core.setFailed(`Deep Agent action crashed: ${message}`);
 });

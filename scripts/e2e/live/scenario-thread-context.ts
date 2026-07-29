@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   await commentOnIssue(
     issue.number,
     `The actual repro: the fix is to use the write_file tool to create an empty file named ` +
-      `"${canaryFile}" — a relative path from the repository root, not an absolute filesystem path.`,
+      `"/${canaryFile}" — an absolute virtual path rooted at the repository.`,
   );
   await commentOnIssue(
     issue.number,
