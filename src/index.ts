@@ -1,6 +1,7 @@
 import * as core from "@actions/core";
 import { context } from "@actions/github";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { loadConfig, mergeRepoConfig, normalizeModel, resolveProviderApiKey } from "./config.js";
@@ -30,7 +31,7 @@ import {
 import { fetchThread, type ThreadInfo } from "./github/thread.js";
 import { parseMemory, appendTurn, buildMemoryContext, type MemoryTurn } from "./github/memory.js";
 import { createModel } from "./agent/model.js";
-import { buildAgent } from "./agent/createAgent.js";
+import { buildAgent, type BuildAgentOptions } from "./agent/createAgent.js";
 import {
   buildSystemPrompt,
   buildUserMessage,
@@ -153,6 +154,7 @@ async function smokeCheck(): Promise<void> {
   const agent = buildAgent({
     model: anthropic,
     rootDir: process.cwd(),
+    mode: "implement",
     systemPrompt: "smoke",
     allowedCommands: ["echo"],
     deniedCommands: [],
@@ -429,7 +431,7 @@ interface FlowParams {
   record: RunRecord;
   commentId: number | undefined;
   url: string;
-  mcpTools: Parameters<typeof buildAgent>[0]["extraTools"];
+  mcpTools: Extract<BuildAgentOptions, { mode: "implement" }>["extraTools"];
   /** Renders a tracking-comment body, re-embedding the thread memory block. */
   renderBody: (state: TrackingState) => string;
   /** Prior turns on this thread, fed back as context and appended to on success. */
@@ -561,6 +563,7 @@ async function runImplement(p: FlowParams): Promise<void> {
     model,
     modelSpec: config.model,
     rootDir,
+    mode: "implement",
     systemPrompt: systemPromptFor(buildSystemPrompt(ctx, { isPRMode }), repoConfig),
     harnessProfile: config.harnessProfile,
     filesystemPermissions: config.filesystemPermissions,
@@ -682,46 +685,54 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
   }
 
   const files = await fetchPrFiles(octokit, ctx);
-  const agent = buildAgent({
-    model,
-    modelSpec: config.model,
-    rootDir,
-    systemPrompt: systemPromptFor(buildReviewSystemPrompt(ctx), repoConfig),
-    harnessProfile: config.harnessProfile,
-    filesystemPermissions: config.filesystemPermissions,
-    interruptOn: config.interruptOn,
-    allowedCommands: config.allowedCommands,
-    deniedCommands: config.deniedCommands,
-    shellTimeoutSeconds: config.shellTimeoutSeconds,
-    toolCallRecord: record.toolCalls,
-    extraTools: p.mcpTools,
-  });
+  const reviewOutputDir = mkdtempSync(join(tmpdir(), "deep-agent-review-"));
+  let result;
+  try {
+    const agent = buildAgent({
+      model,
+      modelSpec: config.model,
+      rootDir,
+      mode: "review",
+      reviewOutputDir,
+      systemPrompt: systemPromptFor(buildReviewSystemPrompt(ctx), repoConfig),
+      harnessProfile: config.harnessProfile,
+      filesystemPermissions: config.filesystemPermissions,
+      interruptOn: config.interruptOn,
+      allowedCommands: config.allowedCommands,
+      deniedCommands: config.deniedCommands,
+      shellTimeoutSeconds: config.shellTimeoutSeconds,
+      toolCallRecord: record.toolCalls,
+    });
 
-  const result = await runAgentStream(
-    agent,
-    {
-      messages: [
-        {
-          role: "user",
-          content: buildReviewUserMessage(
-            instruction,
-            files,
-            buildMemoryContext(p.priorMemory),
-            p.threadContext,
-          ),
-        },
-      ],
-    },
-    {
-      threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "review"}`,
-      debounceMs: config.commentDebounceMs,
-      onProgress: mirrorProgress(p),
-      onActivity: mirrorActivity(p),
-      budget: budgetFrom(config),
-      maxRuntimeMs: maxRuntimeMsFrom(config),
-      recursionLimit: config.recursionLimit,
-    },
-  );
+    result = await runAgentStream(
+      agent,
+      {
+        messages: [
+          {
+            role: "user",
+            content: buildReviewUserMessage(
+              instruction,
+              files,
+              buildMemoryContext(p.priorMemory),
+              p.threadContext,
+            ),
+          },
+        ],
+      },
+      {
+        threadId: `${ctx.owner}/${ctx.repo}#${ctx.entityNumber ?? "review"}`,
+        debounceMs: config.commentDebounceMs,
+        onProgress: mirrorProgress(p),
+        onActivity: mirrorActivity(p),
+        budget: budgetFrom(config),
+        maxRuntimeMs: maxRuntimeMsFrom(config),
+        recursionLimit: config.recursionLimit,
+      },
+    );
+  } catch (err) {
+    rmSync(reviewOutputDir, { recursive: true, force: true });
+    throw err;
+  }
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
   record.stopReason = result.stopped;
@@ -729,6 +740,7 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
   record.activities = result.activities;
 
   if (result.stopped === "interrupt") {
+    rmSync(reviewOutputDir, { recursive: true, force: true });
     record.summary = result.summary || "The review paused before an external tool was run.";
     record.status = "interrupted";
     if (commentId != null) {
@@ -759,12 +771,17 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
   }
 
   // Read the findings the agent wrote (file-handoff).
-  const review = readFindings(rootDir, result.summary);
+  const review = readFindings(reviewOutputDir, result.summary);
+  rmSync(reviewOutputDir, { recursive: true, force: true });
   let unhandled = review.findings;
   let fixSummary = "";
 
   if (p.applyFixes) {
-    const { applied, unhandled: rest } = applyReviewSuggestions(rootDir, review.findings);
+    const { applied, unhandled: rest } = applyReviewSuggestions(
+      rootDir,
+      review.findings,
+      new Set(files.map((file) => file.filename)),
+    );
     unhandled = rest;
     if (applied.length > 0) {
       const land = await landChangesForRun(p, {
@@ -820,9 +837,9 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
   }
 }
 
-/** Read the agent-written review findings file; fall back to a summary-only review. */
-function readFindings(rootDir: string, fallbackSummary: string) {
-  const path = join(rootDir, REVIEW_FINDINGS_FILE);
+/** Read the agent-written isolated review handoff; fall back to a summary-only review. */
+function readFindings(reviewOutputDir: string, fallbackSummary: string) {
+  const path = join(reviewOutputDir, REVIEW_FINDINGS_FILE);
   if (existsSync(path)) {
     try {
       const parsed = parseFindings(JSON.parse(readFileSync(path, "utf8")));

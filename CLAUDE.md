@@ -42,7 +42,7 @@ CI (`.github/workflows/ci.yml`) runs typecheck → format:check → test → smo
 
 ### Agent assembly (`src/agent/`)
 
-`createAgent.ts:buildAgent` wires a `LocalShellBackend` (rooted at the workspace, enabling the `execute` tool) + the model + repository-local deepagents memory/skills + validated filesystem permissions/HITL policy + the shell-guard middleware + any MCP tools. `stream.ts:runAgentStream` drives it in `"values"` streamMode, mirrors the `todos` plan into the tracking comment (debounced), and records typed main/subagent tool activity and pending interrupts. `recursionLimit` is raised to 150 because a read→edit→test→fix loop exceeds LangGraph's default 25.
+`createAgent.ts:buildAgent` wires a guarded `LocalShellBackend` (rooted at the workspace, enforcing command policy for the main agent and subagents) + the model + repository-local deepagents memory/skills + mode-specific filesystem tools and permissions + optional MCP tools in implement mode. `stream.ts:runAgentStream` drives it in `"values"` streamMode, mirrors the `todos` plan into the tracking comment (debounced), and records typed main/subagent tool activity and pending interrupts. `recursionLimit` is raised to 150 because a read→edit→test→fix loop exceeds LangGraph's default 25.
 
 ### Critical constraints (these are the easy things to break)
 
@@ -56,7 +56,7 @@ CI (`.github/workflows/ci.yml`) runs typecheck → format:check → test → smo
 
 ### Review-mode handoff
 
-In review mode the agent writes findings to a JSON file (`REVIEW_FINDINGS_FILE`, see `github/review.ts`); the control plane reads that file back (`index.ts:readFindings`) and posts the inline review. Editing review behavior usually means touching both the review system prompt (`agent/prompt.ts`) and `github/review.ts`.
+In review mode the agent has no repository edit, shell, or MCP tools. It writes findings to `/review-output/findings.json`, which is routed to temporary storage outside the checkout; the control plane reads and removes that handoff before posting the inline review. Auto-applied suggestions must target contained, non-symlink regular files in GitHub's changed-file list. Editing review behavior usually means touching `agent/createAgent.ts`, the review system prompt (`agent/prompt.ts`), and `github/review.ts`.
 
 ## Making changes
 
@@ -65,3 +65,13 @@ In review mode the agent writes findings to a JSON file (`REVIEW_FINDINGS_FILE`,
 - **Tests** are one `*.test.ts` per module under `test/`, Bun's runner, no network. Prefer extracting pure functions and testing those (see `normalizeModel`, `checkContainsTrigger`, `evaluateCommand`, `estimateCostUsd`).
 
 Deeper detail — full file map, the live E2E harness (`.github/workflows/e2e.yml`), and the threat model — is in `CONTRIBUTING.md` and `docs/` (`configuration.md`, `providers.md`, `security.md`, `troubleshooting.md`).
+
+<!-- OPENWIKI:START -->
+
+## OpenWiki
+
+This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links to architecture, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+
+The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
+
+<!-- OPENWIKI:END -->

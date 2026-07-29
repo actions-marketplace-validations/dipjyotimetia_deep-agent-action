@@ -118,7 +118,7 @@ The action automatically discovers only these repository-local sources:
 .deepagents/skills/<skill-name>/SKILL.md
 ```
 
-`AGENTS.md` is loaded as always-on project guidance. Skills are loaded progressively: the agent receives their metadata first and reads a full `SKILL.md` only when the task needs it. The built-in deepagents filesystem tools cannot write under `.deepagents/`; the existing shell command guard remains a separate guardrail.
+`AGENTS.md` is loaded as always-on project guidance. Skills are loaded progressively: the agent receives their metadata first and reads a full `SKILL.md` only when the task needs it. These `.deepagents` paths are the only repository guidance sources loaded by the harness. The built-in deepagents filesystem tools cannot write under `.deepagents/`; shell policy is enforced separately at the shared backend for the main agent and delegated subagents. It filters commands but does not sandbox allowed processes.
 
 The action's existing sticky-comment memory remains the durable per-issue/PR conversation history. It is separate from repository guidance. The action does not configure a deepagents checkpointer or store because a GitHub runner is ephemeral; an interrupt therefore stops safely and the next `@agent resume` starts a fresh run on the existing branch with the prior comment memory.
 
@@ -133,7 +133,7 @@ When MCP tools are loaded, each tool is interrupted before execution by default.
 }
 ```
 
-An interrupted run emits `status: interrupted`, `interrupted: true`, and pending tool metadata in `result_json`; partial work is forced through the existing approval path. Comment `@agent resume` to start a new invocation after reviewing the request.
+An interrupted run emits `status: interrupted`, `interrupted: true`, and pending tool metadata in `result_json`; partial work is forced through the existing approval path. The safe continuation is a new invocation: review the pending request, then comment `@agent resume`. The new run reuses the existing branch and sticky-comment memory; it does not resume the stopped runner process.
 
 ---
 

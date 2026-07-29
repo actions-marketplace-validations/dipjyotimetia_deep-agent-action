@@ -1,6 +1,12 @@
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { evaluateCommand } from "../src/agent/shellGuard.js";
+import { FakeToolCallingModel } from "langchain";
+import { buildAgent } from "../src/agent/createAgent.js";
+import { evaluateCommand, GuardedLocalShellBackend } from "../src/agent/shellGuard.js";
 import { DEFAULT_ALLOWED_COMMANDS, DEFAULT_DENIED_COMMANDS } from "../src/config.js";
+import type { ToolCallRecord } from "../src/types.js";
 
 const allowed = DEFAULT_ALLOWED_COMMANDS;
 const denied = DEFAULT_DENIED_COMMANDS;
@@ -45,5 +51,78 @@ describe("evaluateCommand", () => {
 
   test("rejects an empty command", () => {
     expect(evaluateCommand("   ", allowed, denied).allowed).toBe(false);
+  });
+});
+
+describe("GuardedLocalShellBackend", () => {
+  test("blocks and records a disallowed command before it reaches the host shell", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "da-shell-guard-"));
+    const record: ToolCallRecord[] = [];
+    const backend = new GuardedLocalShellBackend(
+      { rootDir, virtualMode: true },
+      { allowed: ["echo"], denied: [], record },
+    );
+
+    await backend.initialize();
+    const result = await backend.execute("touch blocked-marker");
+
+    expect(result.exitCode).toBe(126);
+    expect(result.output).toContain("Command blocked by policy");
+    expect(existsSync(join(rootDir, "blocked-marker"))).toBe(false);
+    expect(record).toEqual([
+      {
+        name: "execute",
+        args: { command: "touch blocked-marker" },
+        blocked: true,
+        reason: "Command `touch` is not on the allow-list. Allowed: echo.",
+      },
+    ]);
+  });
+
+  test("delegated general-purpose subagents share the command guard", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "da-subagent-guard-"));
+    const record: ToolCallRecord[] = [];
+    const agent = buildAgent({
+      model: new FakeToolCallingModel({
+        toolCalls: [
+          [
+            {
+              id: "task-1",
+              name: "task",
+              args: {
+                description: "Create bypass-marker using the execute tool.",
+                subagent_type: "general-purpose",
+              },
+            },
+          ],
+          [
+            {
+              id: "exec-1",
+              name: "execute",
+              args: { command: "touch bypass-marker" },
+            },
+          ],
+          [],
+          [],
+        ],
+      }),
+      rootDir,
+      mode: "implement",
+      systemPrompt: "Delegate the requested work.",
+      allowedCommands: ["echo"],
+      deniedCommands: [],
+      shellTimeoutSeconds: 5,
+      toolCallRecord: record,
+    });
+
+    await agent.invoke({ messages: [{ role: "user", content: "Delegate this task." }] });
+
+    expect(existsSync(join(rootDir, "bypass-marker"))).toBe(false);
+    expect(record).toContainEqual({
+      name: "execute",
+      args: { command: "touch bypass-marker" },
+      blocked: true,
+      reason: "Command `touch` is not on the allow-list. Allowed: echo.",
+    });
   });
 });

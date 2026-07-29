@@ -25,6 +25,8 @@ A point-in-time audit of the action's feature surface against best practices for
 | No run-level wall-clock cap — only GitHub's job `timeout-minutes`, which kills the job and loses all work | `max_runtime_minutes` input: aborts the agent gracefully via the shared `AbortController` and lands partial work as a draft, with a `timed_out` output |
 | LangGraph recursion limit hardcoded at 150 | `recursion_limit` input |
 | Review findings were plain text | Optional `severity` (`critical`/`warning`/`info`) and `suggestion` fields — rendered as a bold prefix and a one-click GitHub suggested change (`src/github/review.ts`) |
+| Review mode could reach repository edit/shell tools and wrote its handoff into the checkout | Mode-specific filesystem tools, isolated temporary review output, and changed-file/containment/symlink checks before auto-applying suggestions |
+| Delegated subagents could bypass main-agent shell middleware | Command policy moved to the shared local-shell backend, with delegated-subagent regression coverage |
 | Simultaneous mentions raced the sticky comment/memory (last write wins) and could push non-fast-forward | `concurrency` group documented in the README quickstart, every example workflow, and [troubleshooting.md](troubleshooting.md) |
 | System prompt claimed "network access is unavailable" (only specific commands are denied) | Reworded to the accurate claim: no credentials + denied fetch commands |
 | Permission-lookup failures were swallowed silently; push failures surfaced raw git errors (and could echo the tokenized remote URL) | Failure reason logged as a warning; push errors pass stderr through `explainGitHubError` (protected-branch and non-fast-forward hints) with the access token redacted |

@@ -36,13 +36,15 @@ The agent's shell environment is an **allow-list**, not the runner's full enviro
 
 ## 4. Command guardrails
 
-Every shell command the agent runs is screened. — [`src/agent/shellGuard.ts`](../src/agent/shellGuard.ts)
+Every shell command the agent runs is screened at the shared backend boundary, including commands requested by delegated subagents. — [`src/agent/shellGuard.ts`](../src/agent/shellGuard.ts)
 
 - **Allow-list:** only commands on `allowed_commands` (default: a common dev toolchain) may run.
 - **Deny-list:** an always-on list (`curl, wget, nc, ncat, ssh, scp, sudo, su, telnet, dd, mkfs, shutdown, reboot`) is blocked even if also allow-listed — the **deny-list always wins**.
 - Commands are screened across operator-separated segments (so `make && curl …` is caught), and a per-repo `.github/deep-agent.yml` can strengthen, but never weaken, the deny-list.
 
 > Guardrails reduce risk; they are not a complete jail. A determined model with allow-listed tools can still do unexpected things in the workspace. Keep the allow-list as small as your task needs.
+
+The local shell backend executes allowed commands directly on the runner. The command filter is therefore a policy guardrail, not process, filesystem, or network isolation.
 
 ## 5. Human-in-the-loop approval gate
 
@@ -63,6 +65,8 @@ The action loads only repository-local `.deepagents/AGENTS.md` and `.deepagents/
 - Deepagents filesystem writes under `/.deepagents/**` are denied before custom permission rules are applied, so a repository config cannot make its own guidance writable through built-in file tools.
 - `harness_profile`, `filesystem_permissions`, and `interrupt_on` inputs are strict-validated. Workflow inputs take precedence over repository defaults for these fields.
 - The filesystem permission rules do not sandbox shell execution. Keep using the command allow-list, deny-list, and secret-free environment; a real container/jail is required for hard process isolation.
+
+Review mode has a narrower boundary: it exposes read/search tools plus `write_file`, but no `execute` or `edit_file`. Writes are denied everywhere except `/review-output/**`, which is routed to a temporary directory outside the checkout and removed after the findings are consumed. “Review and fix” suggestions are applied by the control plane only to paths returned by GitHub's changed-files API that resolve to contained, non-symlink regular files; rejected suggestions remain review comments.
 
 ## 7. Tool interrupts
 

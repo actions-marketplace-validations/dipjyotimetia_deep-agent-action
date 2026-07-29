@@ -48,7 +48,7 @@ src/
     policy.ts              # Deepagents sources, profile, permission, and HITL policy validation
     prompt.ts              # System/user prompts (implement & review)
     stream.ts              # Run the agent, mirror progress to the comment
-    shellGuard.ts          # Command allow/deny enforcement
+    shellGuard.ts          # Shared backend command allow/deny enforcement and audit
     env.ts                 # Secret-free shell environment allow-list
     mcp.ts                 # Load MCP servers
     cost.ts                # Token → USD estimate
