@@ -166,6 +166,64 @@ describe("deepagents policy defaults", () => {
     expect(getHarnessProfile("openai")?.systemPromptSuffix).toBe("profile applied");
   });
 
+  test("assembles configured specialist subagents with a static provider model override", () => {
+    const root = mkdtempSync(join(tmpdir(), "deep-agent-subagent-"));
+    let requestedModel = "";
+
+    buildAgent({
+      model: fakeModel().respond(new AIMessage("main")),
+      rootDir: root,
+      mode: "implement",
+      systemPrompt: "test",
+      allowedCommands: ["echo"],
+      deniedCommands: [],
+      shellTimeoutSeconds: 5,
+      toolCallRecord: [],
+      subagents: [
+        {
+          name: "release-reviewer",
+          description: "Reviews release readiness.",
+          systemPrompt: "Report concise findings only.",
+          model: "openai:gpt-5",
+          responseMode: "findings",
+        },
+      ],
+      subagentModelFor: (model) => {
+        requestedModel = model;
+        return fakeModel().respond(new AIMessage("specialist"));
+      },
+    });
+
+    expect(requestedModel).toBe("openai:gpt-5");
+  });
+
+  test("does not activate specialists in read-only review mode", () => {
+    expect(() =>
+      buildAgent({
+        model: fakeModel().respond(new AIMessage("review")),
+        rootDir: mkdtempSync(join(tmpdir(), "deep-agent-review-subagent-")),
+        mode: "review",
+        reviewOutputDir: join(tmpdir(), "deep-agent-review-output"),
+        systemPrompt: "test",
+        allowedCommands: ["echo"],
+        deniedCommands: [],
+        shellTimeoutSeconds: 5,
+        toolCallRecord: [],
+        subagents: [
+          {
+            name: "release-reviewer",
+            description: "Reviews release readiness.",
+            systemPrompt: "Report concise findings only.",
+            model: "openai:gpt-5",
+          },
+        ],
+        subagentModelFor: () => {
+          throw new Error("review mode must not build specialists");
+        },
+      }),
+    ).not.toThrow();
+  });
+
   test("loads repository memory and skill metadata through the assembled agent", async () => {
     const root = mkdtempSync(join(tmpdir(), "deep-agent-memory-"));
     mkdirSync(join(root, ".deepagents", "skills", "release"), { recursive: true });

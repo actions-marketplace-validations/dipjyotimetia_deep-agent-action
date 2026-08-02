@@ -56,6 +56,7 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 - 🛑 **Spend caps** — optional `max_cost_usd` / `max_total_tokens` ceilings stop a run the moment it crosses the limit (counting subagent spend too) and land the partial work as a draft for review.
 - 🧠 **Cross-run memory** — a compact history of prior `@agent` turns on the same issue/PR is carried forward as context on the next mention. No backend; stored in the sticky comment.
 - 🧩 **Deepagents memory and skills** — repository-local `.deepagents/AGENTS.md` is loaded as read-only guidance, while `.deepagents/skills/` exposes progressive-disclosure `SKILL.md` workflows to the agent.
+- 🧑‍🔬 **Specialist subagents** — opt into named synchronous specialists for focused work, with static model selection, scoped MCP tools, repository skills, structured findings, and the same approval controls.
 - ⏸️ **Tool approval interrupts** — MCP tools require approval by default when configured; an interrupt pauses safely, records the pending request, and asks for a fresh `@agent resume` run.
 - 🛡️ **Shell guardrails** — an allow-list and an always-on deny-list for shell commands, plus a secret-free environment.
 - 🍴 **Fork-PR protection** — fork PRs are denied by default; maintainers opt in per-PR with a label.
@@ -201,6 +202,7 @@ All inputs are optional.
 | `harness_profile` | Strict deepagents harness-profile JSON (`systemPromptSuffix`, tool overrides, excluded tools/middleware, or general-purpose subagent settings). | — |
 | `filesystem_permissions` | Strict deepagents filesystem-rule JSON with `operations`, absolute glob `paths`, and optional `mode`. `.deepagents/` stays write-protected. | — |
 | `interrupt_on` | Strict deepagents HITL policy JSON. MCP tools are interrupted by default; explicit `false` disables a default. | — |
+| `subagents` | Strict JSON specialist declarations. Each requires `name`, `description`, and `systemPrompt`; optional model, MCP tools, repository skills, deny-only filesystem rules, interrupt policy, and `findings` response mode. | — |
 | `allowed_permissions` | Comma-separated repo permission levels allowed to trigger the agent. | `write,admin` |
 | `allowed_commands` | Comma/newline-separated allow-list of shell commands. | a common dev toolchain¹ |
 | `denied_commands` | Extra command names to block (merged with the built-in deny-list). | — |
@@ -275,6 +277,12 @@ filesystem_permissions:
     paths: ["/src/**"]
 interrupt_on:
   publish_release: true
+subagents:
+  - name: release-reviewer
+    description: Review release readiness.
+    system_prompt: Report concise, actionable findings only.
+    mcp_tools: [publish_release]
+    response_mode: findings
 ```
 
 Repo config supplies defaults for the deepagents policy fields; explicit workflow inputs take precedence for those fields. A committed config can narrow the allow-list and add denials, but it can never weaken the built-in deny-list. Full field reference in [docs/configuration.md](docs/configuration.md).

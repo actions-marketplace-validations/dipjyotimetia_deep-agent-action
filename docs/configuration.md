@@ -106,6 +106,7 @@ A malformed value (e.g. `"$5"` or a negative number) fails the run loudly rather
 | `harness_profile` | — | Strict JSON deepagents harness profile. Supports prompt suffixes, tool-description overrides, excluded tools/middleware, and general-purpose subagent settings. |
 | `filesystem_permissions` | — | Strict JSON array of deepagents filesystem rules. Paths must be absolute globs; writes under `.deepagents/` are always denied. |
 | `interrupt_on` | — | Strict JSON map of tool names to `true`, `false`, or an `allowedDecisions` object. Configured MCP tools default to `true`. |
+| `subagents` | — | Strict JSON array of synchronous specialist declarations. See [Specialist subagents](#specialist-subagents). |
 | `comment_debounce_ms` | `8000` | Minimum interval between edits to the sticky progress comment. |
 | `recursion_limit` | `150` | Max agent super-steps per run. A long read → edit → test → fix loop can reach the ceiling; raise it only when the work is making progress. |
 | `max_repeated_tool_calls` | `8` | Stops an agent after this many identical tool calls without a main-agent todo update. Arguments are compared in memory only and are never added to the public tracking comment. |
@@ -135,6 +136,12 @@ When MCP tools are loaded, each tool is interrupted before execution by default.
 ```
 
 An interrupted run emits `status: interrupted`, `interrupted: true`, and pending tool metadata in `result_json`; partial work is forced through the existing approval path. The safe continuation is a new invocation: review the pending request, then comment `@agent resume`. The new run reuses the existing branch and sticky-comment memory; it does not resume the stopped runner process.
+
+### Specialist subagents
+
+`subagents` opts into named **synchronous** specialists for focused implement-mode work. Each item requires `name`, `description`, and `systemPrompt` (or YAML `system_prompt`). It may select a statically configured provider model, named MCP tools, paths below `/.deepagents/skills/`, deny-only filesystem rules, and a `findings` structured response.
+
+The built-in `general-purpose` subagent cannot be replaced. Referenced MCP tools must exist, specialist MCP calls use the same interrupt policy (and default to approval), and a specialist cannot broaden the main agent's filesystem access. Specialists are not enabled in review mode. Async subagents, external sandbox backends, durable stores, and interpreter tools remain unconfigured because they require separate infrastructure or alter the action's approval boundary.
 
 ---
 
@@ -182,6 +189,7 @@ Source of truth: [`src/config/repoConfig.ts`](../src/config/repoConfig.ts).
 | `harness_profile` | mapping | Deepagents harness profile. Invalid repository values are ignored; an explicit workflow input wins. |
 | `filesystem_permissions` | mapping[] | Deepagents filesystem permission rules. The action always prepends a deny rule for writes under `.deepagents/`. |
 | `interrupt_on` | mapping | Deepagents HITL tool policy. Configured MCP tools still default to interruption. |
+| `subagents` | mapping[] | Synchronous specialist declarations. Invalid repository values are ignored; an explicit workflow input wins. |
 
 ### Example
 
@@ -200,13 +208,19 @@ filesystem_permissions:
     paths: ["/src/**"]
 interrupt_on:
   publish_release: true
+subagents:
+  - name: release-reviewer
+    description: Review release readiness.
+    system_prompt: Report concise, actionable findings only.
+    mcp_tools: [publish_release]
+    response_mode: findings
 ```
 
 ### Merge rules
 
 - Repo config is applied on top of the workflow inputs for the original tuning fields.
 - `model` and `allowed_commands` **override** the input-derived values when present.
-- For `harness_profile`, `filesystem_permissions`, and `interrupt_on`, an explicitly supplied workflow input wins; repository values are defaults.
+- For `harness_profile`, `filesystem_permissions`, `interrupt_on`, and `subagents`, an explicitly supplied workflow input wins; repository values are defaults.
 - `denied_commands` is **always re-merged** with the built-in deny-list — a committed config can only strengthen the deny-list, never weaken it.
 - The `.deepagents/` write-protection floor is always prepended, even when custom filesystem rules allow broader writes.
 - A missing or malformed file is ignored (a warning is logged); it never aborts a run.

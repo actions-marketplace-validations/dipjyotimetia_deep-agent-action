@@ -342,8 +342,11 @@ async function run(): Promise<void> {
 
   try {
     const apiKey = resolveProviderApiKey();
-    const { provider, name } = normalizeModel(config.model);
-    const model = createModel({ provider, model: name, apiKey, baseUrl: config.baseUrl });
+    const modelFor = (modelSpec: string) => {
+      const { provider, name } = normalizeModel(modelSpec);
+      return createModel({ provider, model: name, apiKey, baseUrl: config.baseUrl });
+    };
+    const model = modelFor(config.model);
 
     if (mode === "review") {
       await runReview({
@@ -355,6 +358,7 @@ async function run(): Promise<void> {
         appSlug: tokenResult.appSlug,
         applyFixes,
         model,
+        modelFor,
         instruction,
         repoConfig,
         config,
@@ -376,6 +380,7 @@ async function run(): Promise<void> {
         tokenSource: tokenResult.source,
         appSlug: tokenResult.appSlug,
         model,
+        modelFor,
         instruction,
         repoConfig,
         config,
@@ -426,6 +431,8 @@ interface FlowParams {
   token: string;
   tokenSource: "app" | "github_token";
   model: Parameters<typeof buildAgent>[0]["model"];
+  /** Static-provider model factory for configured specialist overrides. */
+  modelFor: (modelSpec: string) => Parameters<typeof buildAgent>[0]["model"];
   instruction: string;
   repoConfig: RepoConfig;
   config: Config;
@@ -574,6 +581,8 @@ async function runImplement(p: FlowParams): Promise<void> {
     shellTimeoutSeconds: config.shellTimeoutSeconds,
     toolCallRecord: record.toolCalls,
     extraTools: p.mcpTools,
+    subagents: config.subagents,
+    subagentModelFor: p.modelFor,
   });
 
   // "continue"/"resume" seeds the prior turn's incomplete todo list directly
