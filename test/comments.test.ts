@@ -75,6 +75,16 @@ describe("renderTrackingBody", () => {
     expect(renderTrackingBody({ status: "success" })).not.toContain("⚠️");
   });
 
+  test("explains a stalled stop without exposing tool arguments", () => {
+    const body = renderTrackingBody({
+      status: "success",
+      stopReason: "stalled",
+      stopDetail: "Repeated tool call without todo progress: read_file (8 times).",
+    });
+    expect(body).toContain("no-progress loop");
+    expect(body).toContain("read_file (8 times)");
+  });
+
   test("renders a paused tool approval and the rerun instruction", () => {
     const body = renderTrackingBody({
       status: "interrupted",

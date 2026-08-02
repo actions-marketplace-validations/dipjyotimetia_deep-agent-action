@@ -3,6 +3,15 @@ import { githubServerUrl, type Octokit } from "./client.js";
 import { truncateBody } from "./text.js";
 import type { GitHubContext } from "../types.js";
 
+class GitCommandError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+
 /**
  * Run git with arguments (no shell — args are passed directly, injection-safe).
  * Failures are rethrown with the stderr detail (execFileSync puts it on the
@@ -15,15 +24,21 @@ export function runGit(args: string[], cwd: string): string {
   try {
     return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
   } catch (err) {
-    const e = err as { stderr?: unknown; message?: string };
+    const e = err as { stderr?: unknown; message?: string; status?: unknown };
     const detail =
       typeof e.stderr === "string" && e.stderr.trim()
         ? e.stderr.trim()
         : (e.message ?? String(err));
-    throw new Error(
+    throw new GitCommandError(
       `git ${args[0]} failed: ${detail}`.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@"),
+      typeof e.status === "number" ? e.status : undefined,
     );
   }
+}
+
+/** Git returns exit status 2 when `ls-remote --exit-code` finds no matching ref. */
+export function isMissingRemoteBranchStatus(status: number | undefined): boolean {
+  return status === 2;
 }
 
 /** Run `git push`, layering actionable hints onto known rejection messages. */
@@ -122,10 +137,12 @@ export function checkoutIssueBranchIfExists(
 ): boolean {
   const url = pushUrl(token, owner, repo);
   try {
-    runGit(["fetch", "--depth=1", url, branch], rootDir);
-  } catch {
-    return false;
+    runGit(["ls-remote", "--exit-code", "--heads", url, `refs/heads/${branch}`], rootDir);
+  } catch (err) {
+    if (err instanceof GitCommandError && isMissingRemoteBranchStatus(err.status)) return false;
+    throw err;
   }
+  runGit(["fetch", "--depth=1", url, branch], rootDir);
   runGit(["checkout", "-B", branch, "FETCH_HEAD"], rootDir);
   return true;
 }

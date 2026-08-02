@@ -131,9 +131,13 @@ inputs:
     description: "Abort the agent once it has run this many minutes; partial work lands as a draft for review (like a budget stop). Unset = no cap. (A job-level timeout-minutes still applies but kills the run without landing anything.)"
     required: false
   recursion_limit:
-    description: "Max LangGraph super-steps per run. Raise for very long multi-step tasks that abort with a recursion-limit error."
+    description: "Max agent super-steps per run. Raise for very long multi-step tasks that reach the recursion ceiling."
     required: false
     default: "150"
+  max_repeated_tool_calls:
+    description: "Stop when the same tool call repeats without todo progress. Default 8; raise only for intentional repeated operations."
+    required: false
+    default: "8"
   # --- Reserved for future phases (declared so the input surface is intentional) ---
   execution_mode:
     description: "Reserved. Only 'in_runner' is implemented in v1; 'bridge' (hosted Open SWE) is planned (P1)."
@@ -162,6 +166,9 @@ outputs:
   timed_out:
     description: "'true' when the run was stopped early by max_runtime_minutes (partial work opened for review)."
     value: ${{ steps.agent.outputs.timed_out }}
+  stalled:
+    description: "'true' when the agent stopped after repeated no-progress tool calls or reaching its recursion ceiling; partial work is review-gated."
+    value: ${{ steps.agent.outputs.stalled }}
   interrupted:
     description: "'true' when deepagents paused before a configured tool requiring approval."
     value: ${{ steps.agent.outputs.interrupted }}
@@ -233,6 +240,7 @@ runs:
         INPUT_MAX_TOTAL_TOKENS: ${{ inputs.max_total_tokens }}
         INPUT_MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes }}
         INPUT_RECURSION_LIMIT: ${{ inputs.recursion_limit }}
+        INPUT_MAX_REPEATED_TOOL_CALLS: ${{ inputs.max_repeated_tool_calls }}
         INPUT_EXECUTION_MODE: ${{ inputs.execution_mode }}
         INPUT_LANGGRAPH_URL: ${{ inputs.langgraph_url }}
         INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}

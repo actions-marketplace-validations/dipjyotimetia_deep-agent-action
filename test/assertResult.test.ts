@@ -59,6 +59,22 @@ describe("validateResult", () => {
       }).ok,
     ).toBe(true);
   });
+
+  test("accepts a stalled result with a safe stop detail", () => {
+    expect(
+      validateResult({
+        ...valid,
+        stopReason: "stalled",
+        stopDetail: "Repeated tool call without todo progress: read_file (8 times).",
+      }).ok,
+    ).toBe(true);
+  });
+
+  test("rejects an unknown stop reason", () => {
+    expect(validateResult({ ...valid, stopReason: "looped" }).errors.join()).toContain(
+      "stopReason",
+    );
+  });
 });
 
 describe("assertResult", () => {

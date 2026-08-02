@@ -104,8 +104,10 @@ export interface Config {
   maxTotalTokens?: number;
   /** Abort the agent once it has run this many minutes; partial work lands for review. */
   maxRuntimeMinutes?: number;
-  /** Max LangGraph super-steps per run (defaults to 150). */
+  /** Max agent super-steps per run (defaults to 150). */
   recursionLimit: number;
+  /** Stop repeated identical tool calls that make no canonical todo progress. */
+  maxRepeatedToolCalls: number;
 }
 
 /** Token usage for a run. */
@@ -118,7 +120,7 @@ export interface TokenUsage {
 export type RunStatus = "success" | "skipped" | "refused" | "failed" | "interrupted";
 
 /** Why a run was deliberately stopped early (partial work lands for review). */
-export type StopReason = "budget" | "timeout" | "interrupt";
+export type StopReason = "budget" | "timeout" | "interrupt" | "stalled";
 
 /** One recorded tool invocation for the audit record. */
 export interface ToolCallRecord {
@@ -145,8 +147,10 @@ export interface RunRecord {
   costUsd?: number;
   /** True when changes were gated behind approval (draft PR / proposed branch). */
   approvalPending?: boolean;
-  /** Set when the run was deliberately stopped early (budget ceiling / runtime cap). */
+  /** Set when the run was deliberately stopped early (budget, runtime, or stalled loop). */
   stopReason?: StopReason;
+  /** Safe detail for a stalled stop; never contains raw tool arguments. */
+  stopDetail?: string;
   /** Tool calls held for approval when deepagents interrupted the run. */
   pendingInterrupts?: import("./agent/stream.js").PendingToolRequest[];
   /** Deduplicated tool/subagent activity observed during the run. */

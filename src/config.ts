@@ -177,6 +177,9 @@ export function loadConfig(): Config {
     ),
     recursionLimit:
       parsePositiveInteger(core.getInput("recursion_limit"), "recursion_limit") ?? 150,
+    maxRepeatedToolCalls:
+      parsePositiveInteger(core.getInput("max_repeated_tool_calls"), "max_repeated_tool_calls") ??
+      8,
   };
 }
 

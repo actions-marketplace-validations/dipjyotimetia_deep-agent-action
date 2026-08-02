@@ -60,6 +60,7 @@ const base: Config = {
   shellTimeoutSeconds: 600,
   commentDebounceMs: 8000,
   recursionLimit: 150,
+  maxRepeatedToolCalls: 8,
 };
 
 describe("mergeRepoConfig", () => {
