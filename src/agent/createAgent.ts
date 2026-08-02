@@ -21,6 +21,7 @@ import {
   discoverDeepAgentSources,
 } from "./policy.js";
 import type { InterruptPolicy } from "./policy.js";
+import { resolveSubagents, type DeepAgentSubagentConfig } from "./subagents.js";
 
 interface BuildAgentCommonOptions {
   model: BaseChatModel;
@@ -37,6 +38,10 @@ interface BuildAgentCommonOptions {
   filesystemPermissions?: FilesystemPermission[];
   /** Optional tool interrupt rules; MCP tools are interrupted by default. */
   interruptOn?: InterruptPolicy;
+  /** Optional synchronous specialist subagents; ignored in read-only review mode. */
+  subagents?: DeepAgentSubagentConfig[];
+  /** Builds a statically imported provider model for an opted-in specialist override. */
+  subagentModelFor?: (model: string) => BaseChatModel;
   /** Mutable sink the shell guard appends tool-call records to. */
   toolCallRecord: ToolCallRecord[];
 }
@@ -167,6 +172,17 @@ export function buildAgent(opts: BuildAgentOptions) {
     opts.mode === "review"
       ? buildReviewFilesystemPermissions(opts.filesystemPermissions)
       : policy.permissions;
+  const extraTools = opts.mode === "implement" ? (opts.extraTools ?? []) : [];
+  const subagents =
+    opts.mode === "implement"
+      ? resolveSubagents(
+          opts.subagents,
+          extraTools,
+          policy.permissions,
+          policy.skills,
+          opts.subagentModelFor,
+        )
+      : [];
 
   // deepagents rejects filesystem permissions on a raw shell backend because
   // shell commands can bypass path rules. A root composite route makes the
@@ -188,7 +204,7 @@ export function buildAgent(opts: BuildAgentOptions) {
   return createDeepAgent({
     model: opts.model,
     backend,
-    systemPrompt: { prefix: opts.systemPrompt },
+    systemPrompt: opts.systemPrompt,
     middleware: [
       createFilesystemMiddleware({
         backend,
@@ -196,7 +212,8 @@ export function buildAgent(opts: BuildAgentOptions) {
         tools: filesystemTools,
       }),
     ],
-    tools: opts.mode === "implement" ? (opts.extraTools ?? []) : [],
+    tools: extraTools,
+    ...(subagents.length ? { subagents } : {}),
     memory: policy.memory,
     skills: policy.skills,
     interruptOn: policy.interruptOn,

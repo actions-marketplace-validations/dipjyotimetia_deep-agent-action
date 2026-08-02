@@ -44,6 +44,13 @@ describe("composite action metadata", () => {
     expect(run?.env?.INPUT_MAX_REPEATED_TOOL_CALLS).toBe("${{ inputs.max_repeated_tool_calls }}");
     expect(metadata.outputs.stalled.value).toBe("${{ steps.agent.outputs.stalled }}");
   });
+
+  test("exposes and forwards specialist subagent configuration", () => {
+    const run = steps.find((step) => step.name === "Run Deep Agent");
+
+    expect(metadata.inputs.subagents).toBeDefined();
+    expect(run?.env?.INPUT_SUBAGENTS).toBe("${{ inputs.subagents }}");
+  });
 });
 
 describe("repository CI metadata", () => {

@@ -19,6 +19,13 @@ describe("normalizeRepoConfig", () => {
         harness_profile: { systemPromptSuffix: "follow the repo" },
         filesystem_permissions: [{ operations: ["read"], paths: ["/src/**"] }],
         interrupt_on: { publish_release: true },
+        subagents: [
+          {
+            name: "release-reviewer",
+            description: "Reviews releases.",
+            system_prompt: "Report concise findings.",
+          },
+        ],
       }),
     ).toEqual({
       systemPrompt: "be terse",
@@ -30,6 +37,13 @@ describe("normalizeRepoConfig", () => {
       }),
       filesystemPermissions: [{ operations: ["read"], paths: ["/src/**"] }],
       interruptOn: { publish_release: true },
+      subagents: [
+        {
+          name: "release-reviewer",
+          description: "Reviews releases.",
+          systemPrompt: "Report concise findings.",
+        },
+      ],
     });
   });
 
@@ -106,6 +120,13 @@ describe("mergeRepoConfig", () => {
       harnessProfile: actionHarnessProfile,
       filesystemPermissions: actionFilesystemPermissions,
       interruptOn: actionInterruptOn,
+      subagents: [
+        {
+          name: "action-specialist",
+          description: "Action specialist.",
+          systemPrompt: "Use action configuration.",
+        },
+      ],
     };
     const merged = mergeRepoConfig(
       { ...base, ...actionPolicy },
@@ -113,11 +134,19 @@ describe("mergeRepoConfig", () => {
         harnessProfile: repoHarnessProfile,
         filesystemPermissions: repoFilesystemPermissions,
         interruptOn: repoInterruptOn,
+        subagents: [
+          {
+            name: "repo-specialist",
+            description: "Repo specialist.",
+            systemPrompt: "Use repo configuration.",
+          },
+        ],
       },
     );
 
     expect(merged.harnessProfile).toBe(actionHarnessProfile);
     expect(merged.filesystemPermissions).toEqual(actionPolicy.filesystemPermissions);
     expect(merged.interruptOn).toEqual(actionPolicy.interruptOn);
+    expect(merged.subagents).toEqual(actionPolicy.subagents);
   });
 });
