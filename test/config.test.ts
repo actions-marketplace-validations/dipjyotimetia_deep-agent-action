@@ -54,6 +54,13 @@ describe("parseList", () => {
   });
 });
 
+describe("loadConfig model default", () => {
+  test("defaults to Claude Sonnet 5", () => {
+    delete process.env.INPUT_MODEL;
+    expect(loadConfig().model).toBe("anthropic:claude-sonnet-5");
+  });
+});
+
 describe("parseBool", () => {
   test("is true only for truthy strings", () => {
     expect(parseBool("true")).toBe(true);

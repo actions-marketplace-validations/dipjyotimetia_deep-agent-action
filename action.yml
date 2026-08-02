@@ -17,10 +17,10 @@ inputs:
     description: >-
       Model id, optionally provider-prefixed. Providers: anthropic, openai, azure, google (Gemini),
       openrouter, openai-compatible (+ base_url), bedrock (AWS), vertexai (GCP). Examples:
-      'claude-sonnet-4-6', 'openai:gpt-5', 'google:gemini-2.5-pro', 'openrouter:openai/gpt-4o',
+      'claude-sonnet-5', 'openai:gpt-5', 'google:gemini-2.5-pro', 'openrouter:openai/gpt-4o',
       'bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0', 'openai-compatible:llama-3.1-70b'.
     required: false
-    default: "claude-sonnet-4-6"
+    default: "claude-sonnet-5"
   base_url:
     description: "Endpoint URL for the 'openai-compatible' provider (Groq, xAI, DeepSeek, Together, Ollama, vLLM, …)."
     required: false

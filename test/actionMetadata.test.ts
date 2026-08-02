@@ -54,6 +54,10 @@ describe("composite action metadata", () => {
     expect(run?.env?.INPUT_PROTECTED_PATHS).toBe("${{ inputs.protected_paths }}");
   });
 
+  test("defaults to Claude Sonnet 5", () => {
+    expect(metadata.inputs.model.default).toBe("claude-sonnet-5");
+  });
+
   test("does not advertise inert bridge, HITL, or global review-mutation controls", () => {
     const run = steps.find((step) => step.name === "Run Deep Agent");
 

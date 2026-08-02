@@ -78,7 +78,7 @@ export function createModel(params: {
       throw new Error(
         `Unsupported model provider "${provider}". Supported: anthropic, openai, azure, google, ` +
           `openrouter, openai-compatible, bedrock, vertexai. Use a provider-prefixed model id, e.g. ` +
-          `"anthropic:claude-sonnet-4-6", "openrouter:openai/gpt-4o", "openai-compatible:llama-3.1-70b" (+ base_url).`,
+          `"anthropic:claude-sonnet-5", "openrouter:openai/gpt-4o", "openai-compatible:llama-3.1-70b" (+ base_url).`,
       );
   }
 }

@@ -26,10 +26,10 @@ All inputs are optional. Source of truth: [`action.yml`](../action.yml).
 
 ### Model
 
-| Input      | Default             | Notes                                                                            |
-| ---------- | ------------------- | -------------------------------------------------------------------------------- |
-| `model`    | `claude-sonnet-4-6` | Optionally provider-prefixed (`openai:gpt-5`). See [providers.md](providers.md). |
-| `base_url` | —                   | Required for the `openai-compatible` provider; ignored otherwise.                |
+| Input      | Default           | Notes                                                                            |
+| ---------- | ----------------- | -------------------------------------------------------------------------------- |
+| `model`    | `claude-sonnet-5` | Optionally provider-prefixed (`openai:gpt-5`). See [providers.md](providers.md). |
+| `base_url` | —                 | Required for the `openai-compatible` provider; ignored otherwise.                |
 
 ### Authorization
 

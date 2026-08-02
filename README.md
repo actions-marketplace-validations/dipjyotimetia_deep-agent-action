@@ -117,7 +117,7 @@ jobs:
 
       - uses: dipjyotimetia/deep-agent-action@main
         with:
-          model: "claude-sonnet-4-6"
+          model: "claude-sonnet-5"
           prompt: ${{ github.event.inputs.prompt }}
         env:
           PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
@@ -185,11 +185,11 @@ The agent enters **review mode** automatically when the instruction starts with 
 
 ## Models & providers
 
-Set the `model` input (default `claude-sonnet-4-6`). A bare model name infers the provider (`claude…` → Anthropic, `gpt…`/`o…` → OpenAI, `gemini…` → Google); otherwise prefix it with `provider:`.
+Set the `model` input (default `claude-sonnet-5`). A bare model name infers the provider (`claude…` → Anthropic, `gpt…`/`o…` → OpenAI, `gemini…` → Google); otherwise prefix it with `provider:`.
 
 | Provider          | Example `model`                                     | Auth                                         |
 | ----------------- | --------------------------------------------------- | -------------------------------------------- |
-| Anthropic         | `claude-sonnet-4-6`                                 | `PROVIDER_API_KEY` (or `ANTHROPIC_API_KEY`)  |
+| Anthropic         | `claude-sonnet-5`                                   | `PROVIDER_API_KEY` (or `ANTHROPIC_API_KEY`)  |
 | OpenAI            | `openai:gpt-5`                                      | `PROVIDER_API_KEY` (or `OPENAI_API_KEY`)     |
 | Azure OpenAI      | `azure:<deployment>`                                | `AZURE_OPENAI_*` env vars                    |
 | Google Gemini     | `google:gemini-2.5-pro`                             | `PROVIDER_API_KEY` (or `GOOGLE_API_KEY`)     |
@@ -208,7 +208,7 @@ All inputs are optional.
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
 | `trigger_phrase`               | Phrase that triggers the agent in issue/PR/comment bodies.                                                                                                                                                                  | `@agent`                |
 | `prompt`                       | Explicit instruction (e.g. for `workflow_dispatch`); bypasses the trigger phrase.                                                                                                                                           | —                       |
-| `model`                        | Model id, optionally provider-prefixed. See [Models & providers](#models--providers).                                                                                                                                       | `claude-sonnet-4-6`     |
+| `model`                        | Model id, optionally provider-prefixed. See [Models & providers](#models--providers).                                                                                                                                       | `claude-sonnet-5`       |
 | `base_url`                     | Endpoint URL for the `openai-compatible` provider.                                                                                                                                                                          | —                       |
 | `mcp_config`                   | MCP servers JSON: `{ "mcpServers": { name: { command, args, env } \| { url } } }`.                                                                                                                                          | —                       |
 | `harness_profile`              | Strict deepagents harness-profile JSON (`systemPromptSuffix`, tool overrides, excluded tools/middleware, or general-purpose subagent settings).                                                                             | —                       |

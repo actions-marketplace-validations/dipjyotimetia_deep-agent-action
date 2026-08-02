@@ -145,7 +145,7 @@ function maxRuntimeMsFrom(config: Config): number | undefined {
 async function smokeCheck(): Promise<void> {
   const anthropic = createModel({
     provider: "anthropic",
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     apiKey: "smoke",
   });
   const openai = createModel({ provider: "openai", model: "gpt-5", apiKey: "smoke" });

@@ -51,7 +51,7 @@ export interface Config {
   triggerPhrase: string;
   /** Explicit prompt for workflow_dispatch (bypasses the phrase). */
   prompt?: string;
-  /** Provider-prefixed model id, e.g. "anthropic:claude-sonnet-4-6". */
+  /** Provider-prefixed model id, e.g. "anthropic:claude-sonnet-5". */
   model: string;
   /** Base URL for the `openai-compatible` provider (Groq, xAI, DeepSeek, Ollama, vLLM, …). */
   baseUrl?: string;

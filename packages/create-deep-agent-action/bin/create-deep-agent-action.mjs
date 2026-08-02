@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 const ACTION_REF = "0aa91d295a53e472b0a8703d23c3cfc842164270";
 const DEFAULTS = {
   directory: process.cwd(),
-  model: "claude-sonnet-4-6",
+  model: "claude-sonnet-5",
   triggerPhrase: "@agent",
   workflowFile: "deep-agent.yml",
   guidance: true,

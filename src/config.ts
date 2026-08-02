@@ -52,7 +52,7 @@ export const DEFAULT_DENIED_COMMANDS = [
 
 /**
  * Normalize a model id into a provider-prefixed form.
- * `claude-sonnet-4-6` -> `{ provider: "anthropic", name: "claude-sonnet-4-6", full: "anthropic:claude-sonnet-4-6" }`
+ * `claude-sonnet-5` -> `{ provider: "anthropic", name: "claude-sonnet-5", full: "anthropic:claude-sonnet-5" }`
  * `openai:gpt-5` -> `{ provider: "openai", name: "gpt-5", full: "openai:gpt-5" }`
  */
 /** Bare-model-name prefix → provider inference (when no explicit `provider:` prefix). */
@@ -143,7 +143,7 @@ export function loadConfig(): Config {
   return {
     triggerPhrase: core.getInput("trigger_phrase") || "@agent",
     prompt: core.getInput("prompt") || undefined,
-    model: normalizeModel(core.getInput("model") || "claude-sonnet-4-6").full,
+    model: normalizeModel(core.getInput("model") || "claude-sonnet-5").full,
     baseUrl: core.getInput("base_url") || undefined,
     allowedPermissions: parseList(core.getInput("allowed_permissions") || "write,admin"),
     allowedCommands: allowedCommands.length ? allowedCommands : DEFAULT_ALLOWED_COMMANDS,

@@ -51,6 +51,7 @@ describe("create-deep-agent-action", () => {
     expect(workflow).toContain(
       "uses: dipjyotimetia/deep-agent-action@0aa91d295a53e472b0a8703d23c3cfc842164270",
     );
+    expect(workflow).toContain('model: "claude-sonnet-5"');
     expect(workflow).toContain("require_push_approval: true");
     expect(workflow).toContain("PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}");
     expect(readFileSync(join(root, ".deepagents/AGENTS.md"), "utf8")).toContain(

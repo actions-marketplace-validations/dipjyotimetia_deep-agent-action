@@ -14,10 +14,10 @@ Source of truth: [`src/agent/model.ts`](../src/agent/model.ts) and [`src/config.
 - **`provider:name`** → the provider is explicit. Required for every provider except the three inferred above.
 
 ```yaml
-model: "claude-sonnet-4-6"                 # inferred → anthropic
-model: "openai:gpt-5"                       # explicit
-model: "openrouter:openai/gpt-4o"          # explicit (name may itself contain a slash)
-model: "openai-compatible:llama-3.1-70b"   # explicit; also set base_url
+model: "claude-sonnet-5" # inferred → anthropic
+model: "openai:gpt-5" # explicit
+model: "openrouter:openai/gpt-4o" # explicit (name may itself contain a slash)
+model: "openai-compatible:llama-3.1-70b" # explicit; also set base_url
 ```
 
 ## Provider reference
@@ -26,7 +26,7 @@ model: "openai-compatible:llama-3.1-70b"   # explicit; also set base_url
 
 ```yaml
 with:
-  model: "claude-sonnet-4-6"   # or anthropic:claude-sonnet-4-6
+  model: "claude-sonnet-5" # or anthropic:claude-sonnet-5
 env:
   PROVIDER_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -62,7 +62,7 @@ The deployment/instance/version come from the standard `AZURE_OPENAI_*` environm
 
 ```yaml
 with:
-  model: "google:gemini-2.5-pro"   # or gemini:… / google-genai:…
+  model: "google:gemini-2.5-pro" # or gemini:… / google-genai:…
 env:
   PROVIDER_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
 ```
@@ -109,7 +109,7 @@ Credentials and region come from the standard AWS environment chain. Region is r
 
 ```yaml
 with:
-  model: "vertexai:gemini-2.5-pro"   # or vertex:… / google-vertexai:…
+  model: "vertexai:gemini-2.5-pro" # or vertex:… / google-vertexai:…
 env:
   GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
   GOOGLE_CLOUD_LOCATION: us-central1

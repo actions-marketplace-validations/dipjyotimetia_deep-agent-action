@@ -48,7 +48,7 @@ jobs:
           prompt: ${{ github.event.inputs.prompt }}
           # Any supported provider: anthropic | openai | azure | google | openrouter |
           # openai-compatible (+ base_url) | bedrock | vertexai.
-          model: "claude-sonnet-4-6"
+          model: "claude-sonnet-5"
           allowed_commands: "git,npm,pnpm,bun,pytest,go,make"
           require_push_approval: "true" # explicit secure default: draft PR / proposed branch
           protected_paths: ".github/workflows/**,.github/CODEOWNERS"
