@@ -118,6 +118,18 @@ describe("loadConfig recursion limit", () => {
   });
 });
 
+describe("loadConfig repeated tool-call limit", () => {
+  test("defaults to 8, honors an override, and rejects invalid values", () => {
+    delete process.env.INPUT_MAX_REPEATED_TOOL_CALLS;
+    expect(loadConfig().maxRepeatedToolCalls).toBe(8);
+    process.env.INPUT_MAX_REPEATED_TOOL_CALLS = "12";
+    expect(loadConfig().maxRepeatedToolCalls).toBe(12);
+    process.env.INPUT_MAX_REPEATED_TOOL_CALLS = "0";
+    expect(() => loadConfig()).toThrow("max_repeated_tool_calls");
+    delete process.env.INPUT_MAX_REPEATED_TOOL_CALLS;
+  });
+});
+
 describe("loadConfig runner timing inputs", () => {
   test("rejects non-positive or fractional shell timeouts and comment debounce values", () => {
     process.env.INPUT_SHELL_TIMEOUT_SECONDS = "-1";

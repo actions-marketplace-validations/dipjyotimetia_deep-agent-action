@@ -80,7 +80,7 @@ concurrency:
 
 ## A run aborted with a recursion-limit error
 
-Very long multi-step tasks can exceed the LangGraph super-step ceiling (default `150`). Raise the `recursion_limit` input — and consider `max_runtime_minutes` / the budget caps so a runaway task still stops gracefully.
+Very long multi-step tasks can reach the agent super-step ceiling (default `150`). Raise the `recursion_limit` input only when the run is making progress; repeated identical calls are stopped separately by `max_repeated_tool_calls` (default `8`). Consider `max_runtime_minutes` / the budget caps so a runaway task still stops gracefully.
 
 ## The run was stopped early ("max runtime" / "budget cap" banner)
 

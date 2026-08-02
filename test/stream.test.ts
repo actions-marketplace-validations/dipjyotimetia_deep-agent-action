@@ -228,6 +228,115 @@ describe("runAgentStream", () => {
     );
   });
 
+  test("stalls when an identical tool call repeats without todo progress", async () => {
+    const repeatedCall = (id: string) =>
+      new AIMessage({
+        content: "",
+        tool_calls: [{ name: "read_file", args: { path: "/src/index.ts" }, id }],
+      });
+    const result = await runAgentStream(
+      fakeAgent([
+        { todos: [{ content: "inspect", status: "in_progress" }], messages: [repeatedCall("1")] },
+        { todos: [{ content: "inspect", status: "in_progress" }], messages: [repeatedCall("2")] },
+        { todos: [{ content: "inspect", status: "in_progress" }], messages: [repeatedCall("3")] },
+      ]),
+      {},
+      { ...opts, maxRepeatedToolCalls: 3 },
+    );
+
+    expect(result.stopped).toBe("stalled");
+    expect(result.stopDetail).toContain("read_file");
+  });
+
+  test("keeps a detected stalled stop when stream cleanup reports cancellation", async () => {
+    const repeatedCall = (id: string) =>
+      new AIMessage({
+        content: "",
+        tool_calls: [{ name: "read_file", args: { path: "/src/index.ts" }, id }],
+      });
+    const agent = {
+      stream: async function* () {
+        try {
+          yield {
+            todos: [{ content: "inspect", status: "in_progress" }],
+            messages: [repeatedCall("1")],
+          };
+          yield {
+            todos: [{ content: "inspect", status: "in_progress" }],
+            messages: [repeatedCall("2")],
+          };
+        } finally {
+          throw new Error("Aborted");
+        }
+      },
+    };
+
+    const result = await runAgentStream(agent, {}, { ...opts, maxRepeatedToolCalls: 2 });
+    expect(result.stopped).toBe("stalled");
+  });
+
+  test("resets repeated-call tracking when the main todo plan progresses", async () => {
+    const call = (id: string) =>
+      new AIMessage({
+        content: "",
+        tool_calls: [{ name: "read_file", args: { path: "/src/index.ts" }, id }],
+      });
+    const result = await runAgentStream(
+      fakeAgent([
+        { todos: [{ content: "inspect", status: "in_progress" }], messages: [call("1")] },
+        { todos: [{ content: "inspect", status: "in_progress" }], messages: [call("2")] },
+        { todos: [{ content: "inspect", status: "completed" }], messages: [call("3")] },
+      ]),
+      {},
+      { ...opts, maxRepeatedToolCalls: 3 },
+    );
+
+    expect(result.stopped).toBeUndefined();
+  });
+
+  test("does not collide repeated calls with different arguments or namespaces", async () => {
+    const rootRead = new AIMessage({
+      content: "",
+      tool_calls: [{ name: "read_file", args: { path: "/src/a.ts" }, id: "root-1" }],
+    });
+    const otherRead = new AIMessage({
+      content: "",
+      tool_calls: [{ name: "read_file", args: { path: "/src/b.ts" }, id: "root-2" }],
+    });
+    const subagentRead = new AIMessage({
+      content: "",
+      tool_calls: [{ name: "read_file", args: { path: "/src/a.ts" }, id: "subagent-1" }],
+    });
+    const result = await runAgentStream(
+      fakeAgent([
+        { todos: [{ content: "inspect", status: "in_progress" }], messages: [rootRead] },
+        { todos: [{ content: "inspect", status: "in_progress" }], messages: [otherRead] },
+        [["subagent"], { messages: [subagentRead] }],
+      ]),
+      {},
+      { ...opts, maxRepeatedToolCalls: 2 },
+    );
+
+    expect(result.stopped).toBeUndefined();
+  });
+
+  test("turns a recursion-ceiling error into a recoverable stalled stop", async () => {
+    const agent = {
+      stream: async function* () {
+        yield {
+          todos: [{ content: "partial work", status: "in_progress" }],
+          messages: [new AIMessage("Still working")],
+        };
+        throw new Error("Recursion limit of 150 reached without hitting a stop condition.");
+      },
+    };
+
+    const result = await runAgentStream(agent, {}, opts);
+    expect(result.stopped).toBe("stalled");
+    expect(result.stopDetail).toContain("recursion ceiling");
+    expect(result.todos).toEqual([{ content: "partial work", status: "in_progress" }]);
+  });
+
   test("recursionLimit: passed through to the stream config", async () => {
     const seen: number[] = [];
     const agent = {

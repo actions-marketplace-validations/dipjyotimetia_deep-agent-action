@@ -88,7 +88,7 @@ The deny-list always wins: a command on both lists is blocked. See [security.md]
 
 ### Cost & runtime controls
 
-All are unset by default (no cap). A cap is metered across **every** model call — the main agent and its subagents — and aborts the run the instant a ceiling is crossed; the partial work then lands through the approval path (a draft PR / proposed branch) for review, and the matching output (`budget_stopped` or `timed_out`) is set to `true`. Tool interrupts use the separate `interrupted` output.
+All are unset by default (no cap). A cap is metered across **every** model call — the main agent and its subagents — and aborts the run the instant a ceiling is crossed; the partial work then lands through the approval path (a draft PR / proposed branch) for review, and the matching output (`budget_stopped` or `timed_out`) is set to `true`. Tool interrupts use the separate `interrupted` output. A no-progress loop or recursion ceiling sets `stalled` instead.
 
 | Input | Default | Notes |
 |---|---|---|
@@ -107,7 +107,8 @@ A malformed value (e.g. `"$5"` or a negative number) fails the run loudly rather
 | `filesystem_permissions` | — | Strict JSON array of deepagents filesystem rules. Paths must be absolute globs; writes under `.deepagents/` are always denied. |
 | `interrupt_on` | — | Strict JSON map of tool names to `true`, `false`, or an `allowedDecisions` object. Configured MCP tools default to `true`. |
 | `comment_debounce_ms` | `8000` | Minimum interval between edits to the sticky progress comment. |
-| `recursion_limit` | `150` | Max LangGraph super-steps per run. A long read → edit → test → fix loop can exceed the default; raise it if a run aborts with a recursion-limit error. |
+| `recursion_limit` | `150` | Max agent super-steps per run. A long read → edit → test → fix loop can reach the ceiling; raise it only when the work is making progress. |
+| `max_repeated_tool_calls` | `8` | Stops an agent after this many identical tool calls without a main-agent todo update. Arguments are compared in memory only and are never added to the public tracking comment. |
 
 ### Deepagents memory, skills, and approval
 

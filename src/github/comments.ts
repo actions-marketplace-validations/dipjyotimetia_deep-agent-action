@@ -29,6 +29,7 @@ export const STOP_LABELS: Record<StopReason, string> = {
   budget: "budget cap",
   timeout: "max runtime",
   interrupt: "tool approval",
+  stalled: "no-progress loop",
 };
 
 export interface TrackingState {
@@ -46,6 +47,8 @@ export interface TrackingState {
   approvalPending?: boolean;
   /** Set when the run was deliberately stopped early; shows the matching banner. */
   stopReason?: StopReason;
+  /** Safe detail for a stalled stop; never includes raw tool arguments. */
+  stopDetail?: string;
   /** Tool calls held for human approval by deepagents HITL middleware. */
   interrupts?: PendingToolRequest[];
   /** Most recent typed tool/subagent activity, shown during a working run. */
@@ -140,6 +143,7 @@ export function renderTrackingBody(state: TrackingState): string {
         ? "⚠️ Paused at the configured tool approval boundary — partial work was opened for review."
         : `⚠️ Stopped at the configured ${STOP_LABELS[state.stopReason]} — any partial changes were opened for review.`;
     lines.push("", message);
+    if (state.stopReason === "stalled" && state.stopDetail) lines.push(state.stopDetail);
   }
   if (state.tokens && (state.tokens.input || state.tokens.output)) {
     const cost = state.costUsd != null ? ` (~$${state.costUsd.toFixed(4)})` : "";

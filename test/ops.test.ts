@@ -4,6 +4,7 @@ import {
   generateBranchName,
   buildRunBranchSuffix,
   explainGitHubError,
+  isMissingRemoteBranchStatus,
   buildPrBody,
   reuseExistingPr,
 } from "../src/github/ops.js";
@@ -65,6 +66,15 @@ describe("buildRunBranchSuffix", () => {
         GITHUB_ACTION: "agent",
       }),
     ).toBe("30462463978-1-approval-gate-agent");
+  });
+});
+
+describe("isMissingRemoteBranchStatus", () => {
+  test("recognizes only git ls-remote's missing-ref exit status", () => {
+    expect(isMissingRemoteBranchStatus(2)).toBe(true);
+    expect(isMissingRemoteBranchStatus(1)).toBe(false);
+    expect(isMissingRemoteBranchStatus(128)).toBe(false);
+    expect(isMissingRemoteBranchStatus(undefined)).toBe(false);
   });
 });
 

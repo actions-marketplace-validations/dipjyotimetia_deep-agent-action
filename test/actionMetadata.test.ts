@@ -36,6 +36,14 @@ describe("composite action metadata", () => {
     expect(upload?.with?.path).toBe("${{ steps.audit.outputs.audit_path }}");
     expect(upload?.with?.overwrite).toBeUndefined();
   });
+
+  test("exposes and forwards the stalled-loop guard", () => {
+    const run = steps.find((step) => step.name === "Run Deep Agent");
+
+    expect(metadata.inputs.max_repeated_tool_calls.default).toBe("8");
+    expect(run?.env?.INPUT_MAX_REPEATED_TOOL_CALLS).toBe("${{ inputs.max_repeated_tool_calls }}");
+    expect(metadata.outputs.stalled.value).toBe("${{ steps.agent.outputs.stalled }}");
+  });
 });
 
 describe("repository CI metadata", () => {

@@ -607,12 +607,14 @@ async function runImplement(p: FlowParams): Promise<void> {
       budget: budgetFrom(config),
       maxRuntimeMs: maxRuntimeMsFrom(config),
       recursionLimit: config.recursionLimit,
+      maxRepeatedToolCalls: config.maxRepeatedToolCalls,
     },
   );
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
   record.summary = result.summary;
   record.stopReason = result.stopped;
+  record.stopDetail = result.stopDetail;
   record.pendingInterrupts = result.pendingInterrupts;
   record.activities = result.activities;
 
@@ -648,6 +650,7 @@ async function runImplement(p: FlowParams): Promise<void> {
         branch: record.branch,
         approvalPending: record.approvalPending,
         stopReason: record.stopReason,
+        stopDetail: record.stopDetail,
         interrupts: record.pendingInterrupts,
         activity: record.activities?.at(-1),
         tokens: record.tokens,
@@ -728,6 +731,7 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
         budget: budgetFrom(config),
         maxRuntimeMs: maxRuntimeMsFrom(config),
         recursionLimit: config.recursionLimit,
+        maxRepeatedToolCalls: config.maxRepeatedToolCalls,
       },
     );
   } catch (err) {
@@ -737,6 +741,7 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
   record.stopReason = result.stopped;
+  record.stopDetail = result.stopDetail;
   record.pendingInterrupts = result.pendingInterrupts;
   record.activities = result.activities;
 
@@ -757,6 +762,7 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
           interrupts: record.pendingInterrupts,
           activity: record.activities?.at(-1),
           stopReason: record.stopReason,
+          stopDetail: record.stopDetail,
           tokens: record.tokens,
           costUsd: record.costUsd,
           runUrl: url,
@@ -823,6 +829,7 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
         branch: record.branch,
         approvalPending: record.approvalPending,
         stopReason: record.stopReason,
+        stopDetail: record.stopDetail,
         interrupts: record.pendingInterrupts,
         activity: record.activities?.at(-1),
         tokens: record.tokens,

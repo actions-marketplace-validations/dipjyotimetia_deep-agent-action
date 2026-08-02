@@ -223,7 +223,8 @@ All inputs are optional.
 | `max_cost_usd` | Abort the run once estimated spend reaches this many USD; partial work lands as a draft. Requires a known model price — pair with `max_total_tokens` for unpriced models. | — (no cap) |
 | `max_total_tokens` | Abort once cumulative billed tokens (input + output) reach this many; partial work lands as a draft. Re-counted each model call as context grows, so set it generously. | — (no cap) |
 | `max_runtime_minutes` | Abort the agent once it has run this many minutes; partial work lands as a draft (like a budget stop). A job-level `timeout-minutes` still applies but kills the run without landing anything. | — (no cap) |
-| `recursion_limit` | Max LangGraph super-steps per run. Raise for very long multi-step tasks that abort with a recursion-limit error. | `150` |
+| `recursion_limit` | Max agent super-steps per run. Raise for long multi-step tasks that reach the recursion ceiling. | `150` |
+| `max_repeated_tool_calls` | Stop a no-progress loop when the same tool call repeats without a todo update. | `8` |
 | `execution_mode` | Reserved for future hosted/bridge execution. Only `in_runner` is implemented today. | `in_runner` |
 | `langgraph_url` | Reserved for future bridge mode. Ignored in the current action. | — |
 | `assistant_id` | Reserved for future bridge mode. Ignored in the current action. | — |
@@ -248,6 +249,7 @@ All inputs are optional.
 | `branch` | Branch the agent pushed to, if any. |
 | `budget_stopped` | `true` when a cost/token cap stopped the run early (partial work opened for review). |
 | `timed_out` | `true` when `max_runtime_minutes` stopped the run early (partial work opened for review). |
+| `stalled` | `true` when a no-progress loop or recursion ceiling stopped the run early (partial work opened for review). |
 | `interrupted` | `true` when deepagents paused before a configured tool requiring approval. |
 | `audit_artifact` | Invocation-unique name of the uploaded audit-record artifact. |
 | `result_json` | Machine-readable run record (plan, files changed, tokens, cost, outcome). |
