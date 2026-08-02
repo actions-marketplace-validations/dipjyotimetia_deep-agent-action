@@ -166,4 +166,28 @@ describe("loadConfig deepagents policy", () => {
       delete process.env.INPUT_INTERRUPT_ON;
     }
   });
+
+  test("loads strict specialist subagent JSON", () => {
+    process.env.INPUT_SUBAGENTS = JSON.stringify([
+      {
+        name: "release-reviewer",
+        description: "Reviews releases.",
+        systemPrompt: "Report concise findings.",
+        responseMode: "findings",
+      },
+    ]);
+
+    try {
+      expect(loadConfig().subagents).toEqual([
+        {
+          name: "release-reviewer",
+          description: "Reviews releases.",
+          systemPrompt: "Report concise findings.",
+          responseMode: "findings",
+        },
+      ]);
+    } finally {
+      delete process.env.INPUT_SUBAGENTS;
+    }
+  });
 });

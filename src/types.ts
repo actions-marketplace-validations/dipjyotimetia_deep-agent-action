@@ -95,6 +95,8 @@ export interface Config {
   filesystemPermissions?: import("deepagents").FilesystemPermission[];
   /** Optional validated deepagents tool interrupt rules. */
   interruptOn?: import("./agent/policy.js").InterruptPolicy;
+  /** Optional validated synchronous specialist-subagent declarations. */
+  subagents?: import("./agent/subagents.js").DeepAgentSubagentConfig[];
   shellTimeoutSeconds: number;
   /** Minimum interval between tracking-comment edits, ms. */
   commentDebounceMs: number;

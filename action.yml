@@ -42,6 +42,12 @@ inputs:
       Optional deepagents HITL interrupt policy JSON mapping tool names to true/false or an allowedDecisions
       object. MCP tools require approval by default; an explicit false disables that default.
     required: false
+  subagents:
+    description: >-
+      Optional specialist-subagent JSON. Each item requires name, description, and systemPrompt; it may select
+      MCP tools, repository .deepagents skills, restrictive filesystem deny rules, interrupt rules, a model, and
+      responseMode: findings. The built-in general-purpose subagent cannot be replaced.
+    required: false
   allowed_permissions:
     description: "Comma-separated repository permission levels allowed to trigger the agent."
     required: false
@@ -217,6 +223,7 @@ runs:
         INPUT_HARNESS_PROFILE: ${{ inputs.harness_profile }}
         INPUT_FILESYSTEM_PERMISSIONS: ${{ inputs.filesystem_permissions }}
         INPUT_INTERRUPT_ON: ${{ inputs.interrupt_on }}
+        INPUT_SUBAGENTS: ${{ inputs.subagents }}
         INPUT_ALLOWED_PERMISSIONS: ${{ inputs.allowed_permissions }}
         INPUT_ALLOWED_COMMANDS: ${{ inputs.allowed_commands }}
         INPUT_DENIED_COMMANDS: ${{ inputs.denied_commands }}

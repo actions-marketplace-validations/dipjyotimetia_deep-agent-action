@@ -8,6 +8,7 @@ import {
   parseHarnessProfileValue,
   parseInterruptPolicyValue,
 } from "../agent/policy.js";
+import { parseSubagentsValue, type DeepAgentSubagentConfig } from "../agent/subagents.js";
 import type { InterruptPolicy } from "../agent/policy.js";
 import type { FilesystemPermission, HarnessProfile } from "deepagents";
 
@@ -22,6 +23,7 @@ export interface RepoConfig {
   harnessProfile?: HarnessProfile;
   filesystemPermissions?: FilesystemPermission[];
   interruptOn?: InterruptPolicy;
+  subagents?: DeepAgentSubagentConfig[];
 }
 
 const CONFIG_PATHS = [".github/deep-agent.yml", ".github/deep-agent.yaml", ".deep-agent.yml"];
@@ -42,6 +44,7 @@ const RepoConfigSchema = z
     harness_profile: z.unknown().optional().catch(undefined),
     filesystem_permissions: z.unknown().optional().catch(undefined),
     interrupt_on: z.unknown().optional().catch(undefined),
+    subagents: z.unknown().optional().catch(undefined),
   })
   .transform((r): RepoConfig => {
     const cfg: RepoConfig = {};
@@ -72,6 +75,13 @@ const RepoConfigSchema = z
     if (r.interrupt_on !== undefined) {
       try {
         cfg.interruptOn = parseInterruptPolicyValue(r.interrupt_on, "interrupt_on");
+      } catch {
+        // See the harness-profile note above.
+      }
+    }
+    if (r.subagents !== undefined) {
+      try {
+        cfg.subagents = parseSubagentsValue(r.subagents, "subagents");
       } catch {
         // See the harness-profile note above.
       }

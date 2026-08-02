@@ -63,7 +63,7 @@ The action loads only repository-local `.deepagents/AGENTS.md` and `.deepagents/
 
 - `AGENTS.md` is read as always-on context, not as a place to store credentials or task state.
 - Deepagents filesystem writes under `/.deepagents/**` are denied before custom permission rules are applied, so a repository config cannot make its own guidance writable through built-in file tools.
-- `harness_profile`, `filesystem_permissions`, and `interrupt_on` inputs are strict-validated. Workflow inputs take precedence over repository defaults for these fields.
+- `harness_profile`, `filesystem_permissions`, `interrupt_on`, and `subagents` inputs are strict-validated. Workflow inputs take precedence over repository defaults for these fields. Specialist subagents may only add filesystem deny rules, use repository-local skills, and select MCP tools already loaded for the action.
 - The filesystem permission rules do not sandbox shell execution. Keep using the command allow-list, deny-list, and secret-free environment; a real container/jail is required for hard process isolation.
 
 Review mode has a narrower boundary: it exposes read/search tools plus `write_file`, but no `execute` or `edit_file`. Writes are denied everywhere except `/review-output/**`, which is routed to a temporary directory outside the checkout and removed after the findings are consumed. “Review and fix” suggestions are applied by the control plane only to paths returned by GitHub's changed-files API that resolve to contained, non-symlink regular files; rejected suggestions remain review comments.

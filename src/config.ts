@@ -6,6 +6,7 @@ import {
   parseHarnessProfile,
   parseInterruptPolicy,
 } from "./agent/policy.js";
+import { parseSubagents } from "./agent/subagents.js";
 
 /** Default shell commands the agent is allowed to run. */
 export const DEFAULT_ALLOWED_COMMANDS = [
@@ -165,6 +166,7 @@ export function loadConfig(): Config {
     harnessProfile: parseHarnessProfile(core.getInput("harness_profile")),
     filesystemPermissions: parseFilesystemPermissions(core.getInput("filesystem_permissions")),
     interruptOn: parseInterruptPolicy(core.getInput("interrupt_on")),
+    subagents: parseSubagents(core.getInput("subagents")),
     shellTimeoutSeconds:
       parsePositiveInteger(core.getInput("shell_timeout_seconds"), "shell_timeout_seconds") ?? 600,
     commentDebounceMs:
@@ -199,6 +201,7 @@ export function mergeRepoConfig(base: Config, repo: RepoConfig): Config {
     harnessProfile: base.harnessProfile ?? repo.harnessProfile,
     filesystemPermissions: base.filesystemPermissions ?? repo.filesystemPermissions,
     interruptOn: base.interruptOn ?? repo.interruptOn,
+    subagents: base.subagents ?? repo.subagents,
   };
 }
 
