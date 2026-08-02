@@ -29,7 +29,7 @@ The action's core is a single linear orchestration function (`run()` in `src/ind
    - **Agent mode** (`runImplement`): the model plans, edits files, and runs shell commands in the workspace. Progress is mirrored to the tracking comment.
    - **Review mode** (`runReview`): the model reads the PR diff, writes findings to a JSON file, and the control plane posts them as inline review comments.
 
-8. **Land** — `github/ops.ts:landChanges` commits and pushes changes, then reuses or creates a PR. When `require_push_approval` is set (or the run was stopped early by budget/timeout/interrupt), changes land as a draft PR or proposed branch. When `verified_commits` is set, `github/graphqlCommit.ts:landChangesVerified` commits via the `createCommitOnBranch` GraphQL mutation instead. In review mode, `github/review.ts:postReview` posts inline comments, and optionally `applyReviewSuggestions` patches files on disk when `review and fix` or `apply_suggestions` is active.
+8. **Land** — `github/ops.ts:landChanges` commits and pushes changes, then reuses or creates a PR. When `require_push_approval` is set or the run stops early for budget, timeout, or stalled progress, changes land as a draft PR or proposed branch. When `verified_commits` is set, `github/graphqlCommit.ts:landChangesVerified` commits via the `createCommitOnBranch` GraphQL mutation instead. In review mode, `github/review.ts:postReview` posts inline comments, and `review and fix` can apply safe suggestions to the checked-out changed files.
 
 9. **Finalize** — the tracking comment is updated with the final status, PR link, token/cost summary, and appended memory turn. `outputs.ts:emitOutputs` writes GitHub Action outputs (`status`, `pr_url`, `branch`, `result_json`, etc.), a job summary, and a `deep-agent-run.json` audit artifact to `RUNNER_TEMP`.
 
@@ -42,10 +42,9 @@ The action's core is a single linear orchestration function (`run()` in `src/ind
 - The LangChain model instance from `agent/model.ts` (static imports for all 8 providers).
 - Repository-local deepagents memory (`.deepagents/AGENTS.md`) and skills (`.deepagents/skills/`), discovered by `agent/policy.ts`.
 - Validated filesystem permission rules (with a security-floor deny-write for `/.deepagents/**`).
-- Tool interrupt policy (MCP tools interrupted by default).
 - A mode-specific `FilesystemMiddleware` tool allowlist: all filesystem tools in implement mode; read/search plus the isolated review-output write in review mode.
 - Any MCP tools loaded from the `mcp_config` input in implement mode.
-- A `MemorySaver` checkpointer (only when interrupts are configured, since LangGraph requires it for the interrupt primitive).
+- No persistent checkpointer, store, or tool-interrupt protocol: GitHub Actions jobs are ephemeral. Bounded sticky-comment history supplies the supported cross-run continuity.
 
 The assembled agent is driven by `stream.ts:runAgentStream`, which uses `streamMode: "values"` with `subgraphs: true` to track plan/progress from both the main agent and subagents. See the [Agent Subsystem](agent.md) page for full details.
 
@@ -59,9 +58,9 @@ Editing review behavior usually means touching both the review system prompt (`a
 
 These are the easy things to break. They are enforced by code and tested, but changes that violate them will cause subtle runtime failures.
 
-1. **Static model imports are mandatory.** `agent/model.ts` constructs each LangChain chat model with a *static* import. Do not refactor to pass a `"provider:model"` string — that path uses LangChain's dynamic `import()`, which fails to resolve at runtime. The smoke check guards this.
+1. **Static model imports are mandatory.** `agent/model.ts` constructs each LangChain chat model with a _static_ import. Do not refactor to pass a `"provider:model"` string — that path uses LangChain's dynamic `import()`, which fails to resolve at runtime. The smoke check guards this.
 
-2. **The agent shell is secret-free by construction.** `agent/env.ts` is an *allow-list* of env var names; provider keys, `GITHUB_TOKEN`, App keys, and `INPUT_*` are excluded. Don't add secret-bearing names to the list.
+2. **The agent shell is secret-free by construction.** `agent/env.ts` is an _allow-list_ of env var names; provider keys, `GITHUB_TOKEN`, App keys, and `INPUT_*` are excluded. Don't add secret-bearing names to the list.
 
 3. **The built-in command deny-list cannot be weakened.** `mergeRepoConfig` always re-merges `DEFAULT_DENIED_COMMANDS` (`curl`, `wget`, `ssh`, `sudo`, etc.), so a committed repo config can narrow the allow-list and add denials but never remove a default denial.
 
@@ -71,7 +70,7 @@ These are the easy things to break. They are enforced by code and tested, but ch
 
 6. **ESM with explicit `.js` import extensions.** Source is `.ts` but imports use `.js` (e.g. `from "./config.js"`). Keep this when adding imports.
 
-7. **Interrupts are safe stops, not durable resumes.** MCP tools are interrupted by default. The action records pending requests, lands partial work through the approval path, and a later `@agent resume` starts a fresh run using sticky-comment memory (no persistent checkpointer/store).
+7. **Cross-run continuity is deliberately bounded.** `@agent continue` or `resume` seeds a fresh run with incomplete todos from the sticky-comment memory; it is not a durable in-flight resume or a tool-approval protocol.
 
 ## Triage Mode (Opt-In)
 

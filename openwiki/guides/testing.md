@@ -18,36 +18,35 @@ The project has two testing layers: fast unit tests (no network) and a live E2E 
 
 ### Test files by module:
 
-| Test file | Module under test | Key assertions |
-|---|---|---|
-| `config.test.ts` | `src/config.ts` | Input parsing, model normalization, merge precedence, deny-list immutability |
-| `repoConfig.test.ts` | `src/config/repoConfig.ts` | YAML loading, Zod validation, snake_case→camelCase, best-effort failure |
-| `detector.test.ts` | `src/modes/detector.ts` | Mode detection per event type, trigger phrase matching, resume detection |
-| `triage.test.ts` | `src/modes/triage.ts` | Triage classification, label filtering, instruction resolution |
-| `comments.test.ts` | `src/github/comments.ts` | Tracking comment rendering, truncation, status parsing |
-| `thread.test.ts` | `src/github/thread.ts` | Thread context rendering, tracking comment detection |
-| `memory.test.ts` | `src/github/memory.ts` | Memory parse/append/render, turn capping, resume note |
-| `ops.test.ts` | `src/github/ops.ts` | Branch name generation, git error explanation |
-| `graphqlCommit.test.ts` | `src/github/graphqlCommit.ts` | Porcelain status parsing, changeset computation |
-| `review.test.ts` | `src/github/review.ts` | Finding parsing, suggestion application, partition |
-| `context.test.ts` | `src/github/context.ts` | Event payload normalization |
-| `fork.test.ts` | `src/github/fork.ts` | Fork detection, allow-label gating |
-| `stream.test.ts` | `src/agent/stream.ts` | Activity tracking, todo mapping, interrupt extraction |
-| `budget.test.ts` | `src/agent/budget.ts` | Token usage extraction, budget evaluation |
-| `cost.test.ts` | `src/agent/cost.ts` | Price estimation, budget verdict |
-| `shellGuard.test.ts` | `src/agent/shellGuard.ts` | Command evaluation, operator splitting, `$(...)` detection |
-| `env.test.ts` | `src/agent/env.ts` | Allow-list env, secret exclusion |
-| `prompt.test.ts` | `src/agent/prompt.ts` | System prompt, user message, review prompt |
-| `policy.test.ts` / `deepagentsConfig.test.ts` | `src/agent/policy.ts` | Profile/permission/interrupt parsing, security floor |
-| `hitl.test.ts` | HITL interrupt flow | Interrupt policy building, MCP default |
-| `sandbox.test.ts` | VirtualMode sandboxing | Filesystem tool scoping |
-| `actor.test.ts` | Actor validation | Bot detection |
-| `permissions.test.ts` | Permission check | Write/admin gating |
-| `trigger.test.ts` | Trigger extraction | Instruction extraction from text |
-| `text.test.ts` | `src/github/text.ts` | Body truncation |
-| `live-poll.test.ts` | `scripts/e2e/live/poll.ts` | Polling logic |
-| `assertResult.test.ts` | `scripts/e2e/assert-result.ts` | Result validation |
-| `mockContext.ts` | Test helper | Shared mock `GitHubContext` |
+| Test file                  | Module under test              | Key assertions                                                               |
+| -------------------------- | ------------------------------ | ---------------------------------------------------------------------------- |
+| `config.test.ts`           | `src/config.ts`                | Input parsing, model normalization, merge precedence, deny-list immutability |
+| `repoConfig.test.ts`       | `src/config/repoConfig.ts`     | YAML loading, Zod validation, snake_case→camelCase, best-effort failure      |
+| `detector.test.ts`         | `src/modes/detector.ts`        | Mode detection per event type, trigger phrase matching, resume detection     |
+| `triage.test.ts`           | `src/modes/triage.ts`          | Triage classification, label filtering, instruction resolution               |
+| `comments.test.ts`         | `src/github/comments.ts`       | Tracking comment rendering, truncation, status parsing                       |
+| `thread.test.ts`           | `src/github/thread.ts`         | Thread context rendering, tracking comment detection                         |
+| `memory.test.ts`           | `src/github/memory.ts`         | Memory parse/append/render, turn capping, resume note                        |
+| `ops.test.ts`              | `src/github/ops.ts`            | Branch name generation, git error explanation                                |
+| `graphqlCommit.test.ts`    | `src/github/graphqlCommit.ts`  | Porcelain status parsing, changeset computation                              |
+| `review.test.ts`           | `src/github/review.ts`         | Finding parsing, suggestion application, partition                           |
+| `context.test.ts`          | `src/github/context.ts`        | Event payload normalization                                                  |
+| `fork.test.ts`             | `src/github/fork.ts`           | Fork detection, allow-label gating                                           |
+| `stream.test.ts`           | `src/agent/stream.ts`          | Activity tracking, todo mapping, budget/timeout/stall handling               |
+| `budget.test.ts`           | `src/agent/budget.ts`          | Token usage extraction, budget evaluation                                    |
+| `cost.test.ts`             | `src/agent/cost.ts`            | Price estimation, budget verdict                                             |
+| `shellGuard.test.ts`       | `src/agent/shellGuard.ts`      | Command evaluation, operator splitting, `$(...)` detection                   |
+| `env.test.ts`              | `src/agent/env.ts`             | Allow-list env, secret exclusion                                             |
+| `prompt.test.ts`           | `src/agent/prompt.ts`          | System prompt, user message, review prompt                                   |
+| `deepagentsConfig.test.ts` | `src/agent/policy.ts`          | Profile, repository guidance, and filesystem-permission security floor       |
+| `sandbox.test.ts`          | VirtualMode sandboxing         | Filesystem tool scoping                                                      |
+| `actor.test.ts`            | Actor validation               | Bot detection                                                                |
+| `permissions.test.ts`      | Permission check               | Write/admin gating                                                           |
+| `trigger.test.ts`          | Trigger extraction             | Instruction extraction from text                                             |
+| `text.test.ts`             | `src/github/text.ts`           | Body truncation                                                              |
+| `live-poll.test.ts`        | `scripts/e2e/live/poll.ts`     | Polling logic                                                                |
+| `assertResult.test.ts`     | `scripts/e2e/assert-result.ts` | Result validation                                                            |
+| `mockContext.ts`           | Test helper                    | Shared mock `GitHubContext`                                                  |
 
 ## CI Pipeline (`.github/workflows/ci.yml`)
 
@@ -69,11 +68,11 @@ The smoke check is **not optional**. It exists to catch the one class of bug tha
 
 Drives the action as shipped against this repo with a real model and real GitHub API. Runs manually and nightly. Three serialized jobs (shared branch name + artifact name):
 
-| Job | What it tests | Assertions |
-|---|---|---|
-| `implement` | `workflow_dispatch` + prompt opens a real PR | `status=success`, `pr_url` non-empty, `result_json` well-formed, audit artifact valid |
-| `approval-gate` | `require_push_approval: true` | Draft PR with `approvalPending=true` |
-| `budget-cap` | `max_total_tokens: "50"` | `budget_stopped=true`, partial work lands as draft |
+| Job             | What it tests                                | Assertions                                                                            |
+| --------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `implement`     | `workflow_dispatch` + prompt opens a real PR | `status=success`, `pr_url` non-empty, `result_json` well-formed, audit artifact valid |
+| `approval-gate` | `require_push_approval: true`                | Draft PR with `approvalPending=true`                                                  |
+| `budget-cap`    | `max_total_tokens: "50"`                     | `budget_stopped=true`, partial work lands as draft                                    |
 
 Each job cleans up its PR on completion. All jobs are serialized because they share a branch name and artifact name.
 
@@ -87,21 +86,21 @@ A separate dogfood harness that exercises real issue/PR trigger paths with live 
 
 **Scenarios** (`scripts/e2e/live/`):
 
-| Script | Scenario |
-|---|---|
-| `scenario-auto-run.ts` | Auto-run via label trigger |
-| `scenario-resume.ts` | Resume an incomplete plan |
-| `scenario-review.ts` | Code review on a PR |
-| `scenario-thread-context.ts` | Agent receives full thread context |
-| `poll.ts` | Polls for scenario completion |
-| `cleanup.ts` | Cleans up after scenarios |
-| `github.ts` | Shared GitHub API helpers for scenarios |
+| Script                       | Scenario                                |
+| ---------------------------- | --------------------------------------- |
+| `scenario-auto-run.ts`       | Auto-run via label trigger              |
+| `scenario-resume.ts`         | Resume an incomplete plan               |
+| `scenario-review.ts`         | Code review on a PR                     |
+| `scenario-thread-context.ts` | Agent receives full thread context      |
+| `poll.ts`                    | Polls for scenario completion           |
+| `cleanup.ts`                 | Cleans up after scenarios               |
+| `github.ts`                  | Shared GitHub API helpers for scenarios |
 
 ### Result Validator (`scripts/e2e/assert-result.ts`)
 
 Validates the `result_json` (`RunRecord`) emitted by the action. Used by the E2E harness both via stdin and from the downloaded artifact file.
 
-- **`validateResult()`** — structural validation: checks `status`, `mode`, `model`, `plan`, `toolCalls`, `filesChanged`, optional `tokens`, `costUsd`, `approvalPending`, `pendingInterrupts`, `activities`.
+- **`validateResult()`** — structural validation: checks `status`, `mode`, `model`, `plan`, `toolCalls`, `filesChanged`, optional `tokens`, `costUsd`, `approvalPending`, `stopped`, and `activities`.
 - **`assertResult()`** — adds optional `EXPECT_STATUS` env check.
 - **CLI** — reads from file path or stdin; exits non-zero with an error list on failure.
 

@@ -15,6 +15,7 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 
 - [Why this action](#why-this-action)
 - [Features](#features)
+- [Set up with npx](#set-up-with-npx)
 - [Quickstart](#quickstart)
 - [Demo](#demo)
 - [How it works](#how-it-works)
@@ -32,13 +33,13 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 
 ## Why this action
 
-| | Deep Agent Action |
-|---|---|
-| **Setup** | Copy one workflow, add one secret. No app install wizard, no hosted backend. |
-| **Where it runs** | In-process on your runner — your code never leaves your CI. |
-| **Models** | 8 providers: Anthropic, OpenAI, Azure OpenAI, Google Gemini, OpenRouter, any OpenAI-compatible endpoint, AWS Bedrock, GCP Vertex AI. |
-| **Safety** | Command allow/deny guardrails, secret-free shell, fork-PR protection, permission gating, approval-gated landing by default, protected paths, and optional cost/token spend caps. |
-| **Feedback** | A single sticky comment shows a live plan, progress, the PR link, and token/cost estimates. |
+|                   | Deep Agent Action                                                                                                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Setup**         | Copy one workflow, add one secret. No app install wizard, no hosted backend.                                                                                                     |
+| **Where it runs** | In-process on your runner — your code never leaves your CI.                                                                                                                      |
+| **Models**        | 8 providers: Anthropic, OpenAI, Azure OpenAI, Google Gemini, OpenRouter, any OpenAI-compatible endpoint, AWS Bedrock, GCP Vertex AI.                                             |
+| **Safety**        | Command allow/deny guardrails, secret-free shell, fork-PR protection, permission gating, approval-gated landing by default, protected paths, and optional cost/token spend caps. |
+| **Feedback**      | A single sticky comment shows a live plan, progress, the PR link, and token/cost estimates.                                                                                      |
 
 ## Features
 
@@ -61,6 +62,18 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 - 🍴 **Fork-PR protection** — fork PRs are denied by default; maintainers opt in per-PR with a label.
 - 🧰 **MCP tools** — connect Model Context Protocol servers to extend what the agent can do.
 - 🚀 **Zero-config** — sensible defaults for everything; the only required secret is your model provider key.
+
+## Set up with npx
+
+From the root of any Git repository, run:
+
+```sh
+npx create-deep-agent-action
+```
+
+The creator writes a least-privilege `.github/workflows/deep-agent.yml`, pinned to an immutable action commit, and a minimal read-only `.deepagents/AGENTS.md` guidance file. It preserves existing files unless you explicitly pass `--force`; it never writes provider keys or changes GitHub repository settings.
+
+Add `PROVIDER_API_KEY` in **Settings → Secrets and variables → Actions**, then enable **Allow GitHub Actions to create and approve pull requests** under **Settings → Actions → General** if you use the default `GITHUB_TOKEN`. Use `npx create-deep-agent-action --help` for non-interactive model, trigger, target-directory, and guidance options.
 
 ## Quickstart
 
@@ -161,12 +174,12 @@ The agent only acts when it is both **triggered** (a mention or explicit prompt)
 
 ## Usage modes
 
-| You want to… | Where | Comment |
-|---|---|---|
-| Implement a change | An **issue** | `@agent implement X` → opens a PR |
-| Fix / extend a PR | A **pull request** | `@agent address the review feedback` → pushes to the PR branch |
-| Get a code review | A **pull request** | `@agent review` → posts inline comments |
-| Run unattended | **Actions tab** → *Run workflow* | provide a `prompt` input (no mention needed) |
+| You want to…       | Where                            | Comment                                                        |
+| ------------------ | -------------------------------- | -------------------------------------------------------------- |
+| Implement a change | An **issue**                     | `@agent implement X` → opens a PR                              |
+| Fix / extend a PR  | A **pull request**               | `@agent address the review feedback` → pushes to the PR branch |
+| Get a code review  | A **pull request**               | `@agent review` → posts inline comments                        |
+| Run unattended     | **Actions tab** → _Run workflow_ | provide a `prompt` input (no mention needed)                   |
 
 The agent enters **review mode** automatically when the instruction starts with `review` on a pull request; otherwise it implements. Review mode can read and search the checkout but has no shell or repository-edit tool. Its JSON handoff is written to isolated temporary storage outside the repository. When suggestions are applied, only non-symlink regular files from GitHub's changed-file list are eligible; unsafe findings remain comments.
 
@@ -174,16 +187,16 @@ The agent enters **review mode** automatically when the instruction starts with 
 
 Set the `model` input (default `claude-sonnet-4-6`). A bare model name infers the provider (`claude…` → Anthropic, `gpt…`/`o…` → OpenAI, `gemini…` → Google); otherwise prefix it with `provider:`.
 
-| Provider | Example `model` | Auth |
-|---|---|---|
-| Anthropic | `claude-sonnet-4-6` | `PROVIDER_API_KEY` (or `ANTHROPIC_API_KEY`) |
-| OpenAI | `openai:gpt-5` | `PROVIDER_API_KEY` (or `OPENAI_API_KEY`) |
-| Azure OpenAI | `azure:<deployment>` | `AZURE_OPENAI_*` env vars |
-| Google Gemini | `google:gemini-2.5-pro` | `PROVIDER_API_KEY` (or `GOOGLE_API_KEY`) |
-| OpenRouter | `openrouter:openai/gpt-4o` | `PROVIDER_API_KEY` (or `OPENROUTER_API_KEY`) |
-| OpenAI-compatible | `openai-compatible:llama-3.1-70b` + `base_url` | `PROVIDER_API_KEY` |
-| AWS Bedrock | `bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0` | AWS env chain (`AWS_REGION`, …) |
-| GCP Vertex AI | `vertexai:gemini-2.5-pro` | ADC / `GOOGLE_APPLICATION_CREDENTIALS` |
+| Provider          | Example `model`                                     | Auth                                         |
+| ----------------- | --------------------------------------------------- | -------------------------------------------- |
+| Anthropic         | `claude-sonnet-4-6`                                 | `PROVIDER_API_KEY` (or `ANTHROPIC_API_KEY`)  |
+| OpenAI            | `openai:gpt-5`                                      | `PROVIDER_API_KEY` (or `OPENAI_API_KEY`)     |
+| Azure OpenAI      | `azure:<deployment>`                                | `AZURE_OPENAI_*` env vars                    |
+| Google Gemini     | `google:gemini-2.5-pro`                             | `PROVIDER_API_KEY` (or `GOOGLE_API_KEY`)     |
+| OpenRouter        | `openrouter:openai/gpt-4o`                          | `PROVIDER_API_KEY` (or `OPENROUTER_API_KEY`) |
+| OpenAI-compatible | `openai-compatible:llama-3.1-70b` + `base_url`      | `PROVIDER_API_KEY`                           |
+| AWS Bedrock       | `bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0` | AWS env chain (`AWS_REGION`, …)              |
+| GCP Vertex AI     | `vertexai:gemini-2.5-pro`                           | ADC / `GOOGLE_APPLICATION_CREDENTIALS`       |
 
 Full per-provider setup (env vars, regions, credentials) is in [docs/providers.md](docs/providers.md).
 
@@ -191,40 +204,40 @@ Full per-provider setup (env vars, regions, credentials) is in [docs/providers.m
 
 All inputs are optional.
 
-| Input | Description | Default |
-|---|---|---|
-| `trigger_phrase` | Phrase that triggers the agent in issue/PR/comment bodies. | `@agent` |
-| `prompt` | Explicit instruction (e.g. for `workflow_dispatch`); bypasses the trigger phrase. | — |
-| `model` | Model id, optionally provider-prefixed. See [Models & providers](#models--providers). | `claude-sonnet-4-6` |
-| `base_url` | Endpoint URL for the `openai-compatible` provider. | — |
-| `mcp_config` | MCP servers JSON: `{ "mcpServers": { name: { command, args, env } \| { url } } }`. | — |
-| `harness_profile` | Strict deepagents harness-profile JSON (`systemPromptSuffix`, tool overrides, excluded tools/middleware, or general-purpose subagent settings). | — |
-| `filesystem_permissions` | Strict deepagents filesystem-rule JSON with `operations`, absolute glob `paths`, and optional `mode`. Built-in filesystem writes to `.deepagents/` stay denied. | — |
-| `subagents` | Strict JSON specialist declarations. Each requires `name`, `description`, `systemPrompt`, and an explicit MCP-tool allow-list; optional model, repository skills, deny-only filesystem rules, and `findings` response mode. | — |
-| `allowed_permissions` | Comma-separated repo permission levels allowed to trigger the agent. | `write,admin` |
-| `allowed_commands` | Comma/newline-separated allow-list of shell commands. | a common dev toolchain¹ |
-| `denied_commands` | Extra command names to block (merged with the built-in deny-list). | — |
-| `fork_allow_label` | Label a write-access user applies to authorize the agent on a fork PR. If unset, fork PRs never run. | — |
-| `auto_run_label` | Label that, when applied to an issue, runs the agent without a trigger-phrase match. | — |
-| `auto_run_assignee` | GitHub username that, when assigned to an issue, runs the agent without a trigger-phrase match. | — |
-| `auto_run_default_instruction` | Fallback instruction for an auto-run event when the issue has no usable title/body text. | — |
-| `shell_timeout_seconds` | Max seconds for a single shell command. | `600` |
-| `comment_debounce_ms` | Minimum interval between tracking-comment progress edits. | `8000` |
-| `provider_api_key` | Model provider API key. Also read from `PROVIDER_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` / `OPENROUTER_API_KEY`. | — |
-| `app_id` | GitHub App id used to mint a scoped installation token. Also read from `APP_ID`. | — |
-| `app_private_key` | GitHub App private key (PEM). Also read from `APP_PRIVATE_KEY`. | — |
-| `github_token` | Token for GitHub API/git operations. | `${{ github.token }}` |
-| `require_push_approval` | Gate landing of changes behind human review (draft PR / proposed branch). | `true` |
-| `protected_paths` | Extra repository-relative globs the agent may modify during a run but can never publish. Agent guidance and repo config paths are always protected. | — |
-| `verified_commits` | Land via the GitHub App's `createCommitOnBranch` GraphQL mutation so commits show as "Verified". Requires `app_id`/`app_private_key`. | `false` |
-| `enable_triage` | Classify a new issue with no trigger phrase (open a PR, request a review, ask for clarification, add labels, or do nothing). | `false` |
-| `triage_allowed_labels` | Labels the triage classifier may apply. Anything outside this list is ignored. | — |
-| `triage_model` | Model used for the triage classification call. | `model` |
-| `max_cost_usd` | Abort the run once estimated spend reaches this many USD; partial work lands as a draft. Requires a known model price — pair with `max_total_tokens` for unpriced models. | — (no cap) |
-| `max_total_tokens` | Abort once cumulative billed tokens (input + output) reach this many; partial work lands as a draft. Re-counted each model call as context grows, so set it generously. | — (no cap) |
-| `max_runtime_minutes` | Abort the agent once it has run this many minutes; partial work lands as a draft (like a budget stop). A job-level `timeout-minutes` still applies but kills the run without landing anything. | — (no cap) |
-| `recursion_limit` | Max agent super-steps per run. Raise for long multi-step tasks that reach the recursion ceiling. | `150` |
-| `max_repeated_tool_calls` | Stop a no-progress loop when the same tool call repeats without a todo update. | `8` |
+| Input                          | Description                                                                                                                                                                                                                 | Default                 |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `trigger_phrase`               | Phrase that triggers the agent in issue/PR/comment bodies.                                                                                                                                                                  | `@agent`                |
+| `prompt`                       | Explicit instruction (e.g. for `workflow_dispatch`); bypasses the trigger phrase.                                                                                                                                           | —                       |
+| `model`                        | Model id, optionally provider-prefixed. See [Models & providers](#models--providers).                                                                                                                                       | `claude-sonnet-4-6`     |
+| `base_url`                     | Endpoint URL for the `openai-compatible` provider.                                                                                                                                                                          | —                       |
+| `mcp_config`                   | MCP servers JSON: `{ "mcpServers": { name: { command, args, env } \| { url } } }`.                                                                                                                                          | —                       |
+| `harness_profile`              | Strict deepagents harness-profile JSON (`systemPromptSuffix`, tool overrides, excluded tools/middleware, or general-purpose subagent settings).                                                                             | —                       |
+| `filesystem_permissions`       | Strict deepagents filesystem-rule JSON with `operations`, absolute glob `paths`, and optional `mode`. Built-in filesystem writes to `.deepagents/` stay denied.                                                             | —                       |
+| `subagents`                    | Strict JSON specialist declarations. Each requires `name`, `description`, `systemPrompt`, and an explicit MCP-tool allow-list; optional model, repository skills, deny-only filesystem rules, and `findings` response mode. | —                       |
+| `allowed_permissions`          | Comma-separated repo permission levels allowed to trigger the agent.                                                                                                                                                        | `write,admin`           |
+| `allowed_commands`             | Comma/newline-separated allow-list of shell commands.                                                                                                                                                                       | a common dev toolchain¹ |
+| `denied_commands`              | Extra command names to block (merged with the built-in deny-list).                                                                                                                                                          | —                       |
+| `fork_allow_label`             | Label a write-access user applies to authorize the agent on a fork PR. If unset, fork PRs never run.                                                                                                                        | —                       |
+| `auto_run_label`               | Label that, when applied to an issue, runs the agent without a trigger-phrase match.                                                                                                                                        | —                       |
+| `auto_run_assignee`            | GitHub username that, when assigned to an issue, runs the agent without a trigger-phrase match.                                                                                                                             | —                       |
+| `auto_run_default_instruction` | Fallback instruction for an auto-run event when the issue has no usable title/body text.                                                                                                                                    | —                       |
+| `shell_timeout_seconds`        | Max seconds for a single shell command.                                                                                                                                                                                     | `600`                   |
+| `comment_debounce_ms`          | Minimum interval between tracking-comment progress edits.                                                                                                                                                                   | `8000`                  |
+| `provider_api_key`             | Model provider API key. Also read from `PROVIDER_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY` / `OPENROUTER_API_KEY`.                                                                               | —                       |
+| `app_id`                       | GitHub App id used to mint a scoped installation token. Also read from `APP_ID`.                                                                                                                                            | —                       |
+| `app_private_key`              | GitHub App private key (PEM). Also read from `APP_PRIVATE_KEY`.                                                                                                                                                             | —                       |
+| `github_token`                 | Token for GitHub API/git operations.                                                                                                                                                                                        | `${{ github.token }}`   |
+| `require_push_approval`        | Gate landing of changes behind human review (draft PR / proposed branch).                                                                                                                                                   | `true`                  |
+| `protected_paths`              | Extra repository-relative globs the agent may modify during a run but can never publish. Agent guidance and repo config paths are always protected.                                                                         | —                       |
+| `verified_commits`             | Land via the GitHub App's `createCommitOnBranch` GraphQL mutation so commits show as "Verified". Requires `app_id`/`app_private_key`.                                                                                       | `false`                 |
+| `enable_triage`                | Classify a new issue with no trigger phrase (open a PR, request a review, ask for clarification, add labels, or do nothing).                                                                                                | `false`                 |
+| `triage_allowed_labels`        | Labels the triage classifier may apply. Anything outside this list is ignored.                                                                                                                                              | —                       |
+| `triage_model`                 | Model used for the triage classification call.                                                                                                                                                                              | `model`                 |
+| `max_cost_usd`                 | Abort the run once estimated spend reaches this many USD; partial work lands as a draft. Requires a known model price — pair with `max_total_tokens` for unpriced models.                                                   | — (no cap)              |
+| `max_total_tokens`             | Abort once cumulative billed tokens (input + output) reach this many; partial work lands as a draft. Re-counted each model call as context grows, so set it generously.                                                     | — (no cap)              |
+| `max_runtime_minutes`          | Abort the agent once it has run this many minutes; partial work lands as a draft (like a budget stop). A job-level `timeout-minutes` still applies but kills the run without landing anything.                              | — (no cap)              |
+| `recursion_limit`              | Max agent super-steps per run. Raise for long multi-step tasks that reach the recursion ceiling.                                                                                                                            | `150`                   |
+| `max_repeated_tool_calls`      | Stop a no-progress loop when the same tool call repeats without a todo update.                                                                                                                                              | `8`                     |
 
 ¹ Default `allowed_commands`: `git, ls, cat, mkdir, touch, cp, mv, node, npm, npx, pnpm, yarn, bun, python, python3, pip, pytest, go, make, cargo, rustc, sed, grep, find, echo`. Always-on deny-list: `curl, wget, nc, ncat, ssh, scp, sudo, su, telnet, dd, mkfs, shutdown, reboot`. See [docs/configuration.md](docs/configuration.md).
 
@@ -236,16 +249,16 @@ All inputs are optional.
 
 ## Outputs
 
-| Output | Description |
-|---|---|
-| `status` | Run outcome: `success` \| `skipped` \| `refused` \| `failed`. |
-| `pr_url` | URL of the opened pull request (or compare link), if any. |
-| `branch` | Branch the agent pushed to, if any. |
-| `budget_stopped` | `true` when a cost/token cap stopped the run early (partial work opened for review). |
-| `timed_out` | `true` when `max_runtime_minutes` stopped the run early (partial work opened for review). |
-| `stalled` | `true` when a no-progress loop or recursion ceiling stopped the run early (partial work opened for review). |
-| `audit_artifact` | Invocation-unique name of the uploaded audit-record artifact. |
-| `result_json` | Machine-readable run record (plan, files changed, tokens, cost, outcome). |
+| Output           | Description                                                                                                 |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| `status`         | Run outcome: `success` \| `skipped` \| `refused` \| `failed`.                                               |
+| `pr_url`         | URL of the opened pull request (or compare link), if any.                                                   |
+| `branch`         | Branch the agent pushed to, if any.                                                                         |
+| `budget_stopped` | `true` when a cost/token cap stopped the run early (partial work opened for review).                        |
+| `timed_out`      | `true` when `max_runtime_minutes` stopped the run early (partial work opened for review).                   |
+| `stalled`        | `true` when a no-progress loop or recursion ceiling stopped the run early (partial work opened for review). |
+| `audit_artifact` | Invocation-unique name of the uploaded audit-record artifact.                                               |
+| `result_json`    | Machine-readable run record (plan, files changed, tokens, cost, outcome).                                   |
 
 Every run also writes a job summary and uploads an invocation-scoped `deep-agent-run-<uuid>` artifact as an audit record. Its exact name is exposed through the `audit_artifact` output, so parallel jobs, matrix jobs, and repeated action steps cannot replace each other's records.
 
@@ -279,16 +292,16 @@ This is a guardrail model, not a sandbox: allowed commands execute directly on t
 
 Ready-to-copy workflows live in [`examples/`](examples/):
 
-| Example | What it shows |
-|---|---|
-| [`agent.yml`](examples/agent.yml) | The all-in-one starting point. |
-| [`review.yml`](examples/review.yml) | Code-review-only setup for pull requests. |
-| [`approval-gate.yml`](examples/approval-gate.yml) | Require human approval before changes land. |
-| [`multi-provider.yml`](examples/multi-provider.yml) | OpenAI, Bedrock, Vertex, OpenRouter, and OpenAI-compatible variants. |
-| [`mcp-tools.yml`](examples/mcp-tools.yml) | Extend the agent with MCP servers. |
-| [`github-app.yml`](examples/github-app.yml) | Use a GitHub App so the agent's PRs trigger your CI. |
-| [`issue-automation.yml`](examples/issue-automation.yml) | Turn issue comments/labels into PRs. |
-| [`scheduled-maintenance.yml`](examples/scheduled-maintenance.yml) | Unattended `schedule`-triggered runs (e.g. dependency upgrades). |
+| Example                                                           | What it shows                                                        |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------- |
+| [`agent.yml`](examples/agent.yml)                                 | The all-in-one starting point.                                       |
+| [`review.yml`](examples/review.yml)                               | Code-review-only setup for pull requests.                            |
+| [`approval-gate.yml`](examples/approval-gate.yml)                 | Require human approval before changes land.                          |
+| [`multi-provider.yml`](examples/multi-provider.yml)               | OpenAI, Bedrock, Vertex, OpenRouter, and OpenAI-compatible variants. |
+| [`mcp-tools.yml`](examples/mcp-tools.yml)                         | Extend the agent with MCP servers.                                   |
+| [`github-app.yml`](examples/github-app.yml)                       | Use a GitHub App so the agent's PRs trigger your CI.                 |
+| [`issue-automation.yml`](examples/issue-automation.yml)           | Turn issue comments/labels into PRs.                                 |
+| [`scheduled-maintenance.yml`](examples/scheduled-maintenance.yml) | Unattended `schedule`-triggered runs (e.g. dependency upgrades).     |
 
 ## Troubleshooting
 

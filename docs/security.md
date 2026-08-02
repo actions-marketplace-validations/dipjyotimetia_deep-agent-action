@@ -8,6 +8,8 @@ The agent executes model-generated edits and shell commands inside your runner. 
 
 A model-driven agent runs with your runner's permissions. The controls below limit **who can invoke it**, **what it can run**, and **what it can see**. It is a layered guardrail model, **not a sandbox** — run it with providers and on repositories you trust.
 
+The `npx create-deep-agent-action` installer follows the same boundary: it writes a reviewed workflow template and optional repository guidance only. It never reads or writes provider credentials, calls GitHub APIs, or changes repository settings.
+
 ## 1. Who can trigger it
 
 Before any agent work begins, two checks must pass (see [`src/github/validation/`](../src/github/validation/)):
