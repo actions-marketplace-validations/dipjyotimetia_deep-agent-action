@@ -49,17 +49,6 @@ describe("validateResult", () => {
     expect(validateResult(minimal).ok).toBe(true);
   });
 
-  test("accepts an interrupted result with pending tool metadata", () => {
-    expect(
-      validateResult({
-        ...valid,
-        status: "interrupted",
-        stopReason: "interrupt",
-        pendingInterrupts: [{ name: "publish_release", args: { tag: "v1.2.3" } }],
-      }).ok,
-    ).toBe(true);
-  });
-
   test("accepts a stalled result with a safe stop detail", () => {
     expect(
       validateResult({

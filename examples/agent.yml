@@ -4,10 +4,10 @@
 # Usage:
 #   - On an issue:        "@agent implement X"   → opens a PR with the change.
 #   - On a pull request:  "@agent review"        → posts an inline code review.
-#   - On a pull request:  "@agent fix Y"         → pushes a commit to the PR branch.
+#   - On a pull request:  "@agent fix Y"         → proposes a branch for review by default.
 #
-# Per-repo tuning (optional): commit `.github/deep-agent.yml` with
-#   system_prompt / allowed_commands / denied_commands / model.
+# Per-repo guidance (optional): commit `.github/deep-agent.yml` with
+#   system_prompt. Keep runtime and security policy in this workflow.
 name: Deep Agent
 
 on:
@@ -50,13 +50,14 @@ jobs:
           # openai-compatible (+ base_url) | bedrock | vertexai.
           model: "claude-sonnet-4-6"
           allowed_commands: "git,npm,pnpm,bun,pytest,go,make"
-          # require_push_approval: "true"        # gate changes behind review (draft PR / proposed branch)
+          require_push_approval: "true" # explicit secure default: draft PR / proposed branch
+          protected_paths: ".github/workflows/**,.github/CODEOWNERS"
           # fork_allow_label: "agent-approved"   # opt-in fork support, maintainer-gated
           # max_cost_usd: "2.00"                 # stop the run at ~$2 spend; partial work lands as a draft (needs a known model price)
           # max_total_tokens: "500000"           # or cap by tokens; re-counted each model call as context grows, so set it generously
           # max_runtime_minutes: "15"            # or cap by wall-clock; stops gracefully and lands partial work (unlike job timeout-minutes)
           # base_url: "https://api.groq.com/openai/v1"        # for model: "openai-compatible:..."
-          # mcp_config: '{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}'
+          # mcp_config: '{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}' # only use deliberately scoped servers
         env:
           # Required: your model provider key (this is the only secret you must add).
           # Bedrock uses AWS_* env; Vertex AI uses GOOGLE_APPLICATION_CREDENTIALS; Azure uses AZURE_OPENAI_* env.

@@ -9,12 +9,12 @@ A point-in-time audit of the action's feature surface against best practices for
 - **Unweakenable command deny-list.** A committed `.github/deep-agent.yml` can narrow the allow-list and add denials, but the built-in deny-list is always re-merged (`src/config.ts`).
 - **Budget metering that counts subagents.** The `BudgetMeter` is a LangChain callback (not a stream-loop check), so subagent token spend is metered too, and a breach aborts mid-subagent. Budget/runtime stops land partial work through the approval path instead of losing it.
 - **Sticky tracking comment with live plan + cross-run memory.** One comment per thread, updated in place, carrying a hidden, base64-encoded turn history that is fed back fenced as *data, not instructions* (prompt-injection guard, `src/github/memory.ts`).
-- **Deepagents-native project policy.** Repository `.deepagents/AGENTS.md` memory and progressive-disclosure skills are wired through the backend, with strict profile/permission/interrupt validation and an always-on write-protection floor for `.deepagents/`.
-- **Safe HITL interruptions.** MCP tools pause before execution by default; interrupted runs preserve audit metadata and partial work through the existing approval path without pretending an ephemeral runner can resume a graph.
+- **Deepagents-native project policy.** Repository `.deepagents/AGENTS.md` memory and progressive-disclosure skills are wired through the backend, with strict profile/permission validation and an always-on write-protection floor for `.deepagents/`.
+- **Honest lifecycle.** Unsupported ephemeral-runner HITL controls were removed; MCP is explicitly workflow-owned and approval-gated landing protects repository changes.
 - **Typed activity visibility.** Tool calls and results from main and subagent streams are deduplicated into the tracking comment and audit record.
 - **Static provider imports + smoke check.** All 8 providers are constructed via static imports; CI's smoke step catches the provider-package-loading class of bug that unit tests cannot.
 - **Auditability.** Every run emits `result_json`, a job summary, and a retained `deep-agent-run.json` artifact recording the plan, every tool call (including blocked ones and why), files changed, tokens, and cost.
-- **Honest docs.** Documented features match the implementation; reserved-but-unimplemented inputs (`execution_mode: bridge`) say so in their descriptions.
+- **Honest docs.** Documented inputs map to real execution behavior; inert bridge-mode inputs are not exposed.
 
 ## Gaps closed by this review
 
@@ -30,13 +30,13 @@ A point-in-time audit of the action's feature surface against best practices for
 | Simultaneous mentions raced the sticky comment/memory (last write wins) and could push non-fast-forward | `concurrency` group documented in the README quickstart, every example workflow, and [troubleshooting.md](troubleshooting.md) |
 | System prompt claimed "network access is unavailable" (only specific commands are denied) | Reworded to the accurate claim: no credentials + denied fetch commands |
 | Permission-lookup failures were swallowed silently; push failures surfaced raw git errors (and could echo the tokenized remote URL) | Failure reason logged as a warning; push errors pass stderr through `explainGitHubError` (protected-branch and non-fast-forward hints) with the access token redacted |
-| Deepagents had first-class memory/skills/policy/HITL features available but the action did not expose them | Repository-local memory and skills, strict policy inputs, protected filesystem rules, MCP-default interrupts, typed activity, and explicit interrupted status |
+| Deepagents had first-class memory/skills/policy features available but the action did not expose them | Repository-local memory and skills, strict policy inputs, protected filesystem rules, explicit MCP tool selection, and typed activity |
 
 ## Roadmap (deliberately deferred)
 
 These are real gaps versus the strongest agentic actions, each big enough to deserve its own design rather than a bolt-on:
 
-- **`execution_mode: bridge`.** The reserved inputs (`execution_mode`, `langgraph_url`, `assistant_id`) exist in `action.yml` for a hosted-agent mode; only `in_runner` is implemented.
+- **Hosted bridge mode.** Not exposed until it has an implemented, tested runtime contract.
 - **A real sandbox backend.** The shell guard is a guardrail, not a sandbox: allow-listed interpreters (`node`, `python`, `go`, …) can open sockets, so network isolation ultimately rests on the secret-free env. A container/jail execution backend would make the "no network" property enforceable.
 - **Cost-table coverage.** `src/agent/cost.ts` prices the major Anthropic/OpenAI/Gemini families; Bedrock/Vertex model ids and newer models fall back to token-only reporting (pair `max_cost_usd` with `max_total_tokens` meanwhile).
 - **Budget fail-open on silent providers.** A provider reporting neither `usage_metadata` nor `llmOutput.tokenUsage` contributes zero to the meter, so token caps can't bind for it. `max_runtime_minutes` now provides a provider-independent backstop.

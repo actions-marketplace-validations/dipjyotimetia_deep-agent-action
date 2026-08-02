@@ -3,7 +3,8 @@
 #
 # mcp_config is a JSON string. Each server is either a local command
 # ({ command, args, env }) or a remote URL ({ url }). The servers' tools are
-# exposed to the agent alongside its built-in file/shell tools.
+# exposed to the agent alongside its built-in file/shell tools. MCP calls can
+# have external side effects, so use only servers and endpoints you trust.
 name: Deep Agent (MCP tools)
 
 on:
@@ -36,8 +37,13 @@ jobs:
       - uses: dipjyotimetia/deep-agent-action@main
         with:
           model: "claude-sonnet-4-6"
+          require_push_approval: "true"
+          protected_paths: ".github/workflows/**,.github/CODEOWNERS"
+          max_runtime_minutes: "10"
+          max_total_tokens: "250000"
           # A single local server (HTTP fetch). Use valid JSON on one line, or a
-          # YAML block scalar as below for readability.
+          # YAML block scalar as below for readability. Keep the server's own
+          # credentials and capabilities least-privileged.
           mcp_config: |
             {
               "mcpServers": {

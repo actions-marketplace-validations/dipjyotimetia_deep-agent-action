@@ -8,9 +8,9 @@
  */
 import { readFileSync } from "node:fs";
 
-const STATUSES = ["success", "skipped", "refused", "failed", "interrupted"];
+const STATUSES = ["success", "skipped", "refused", "failed"];
 const MODES = ["agent", "review", "noop"];
-const STOP_REASONS = ["budget", "timeout", "interrupt", "stalled"];
+const STOP_REASONS = ["budget", "timeout", "stalled"];
 
 export interface ValidationResult {
   ok: boolean;
@@ -52,19 +52,6 @@ export function validateResult(obj: unknown): ValidationResult {
     req(typeof r.costUsd === "number", "costUsd, when present, must be a number");
   if (r.approvalPending != null) {
     req(typeof r.approvalPending === "boolean", "approvalPending, when present, must be a boolean");
-  }
-  if (r.pendingInterrupts != null) {
-    req(Array.isArray(r.pendingInterrupts), "pendingInterrupts, when present, must be an array");
-    if (Array.isArray(r.pendingInterrupts)) {
-      for (const request of r.pendingInterrupts) {
-        req(
-          typeof request === "object" &&
-            request !== null &&
-            typeof (request as Record<string, unknown>).name === "string",
-          "pendingInterrupts entries must include a string name",
-        );
-      }
-    }
   }
   if (r.activities != null) {
     req(Array.isArray(r.activities), "activities, when present, must be an array");

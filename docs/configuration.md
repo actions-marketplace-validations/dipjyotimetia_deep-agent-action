@@ -40,9 +40,9 @@ All inputs are optional. Source of truth: [`action.yml`](../action.yml).
 
 | Input | Default | Notes |
 |---|---|---|
-| `require_push_approval` | `false` | Gate landing behind human review: draft PR (issue mode) or a proposed branch + compare link (PR mode). |
+| `require_push_approval` | `true` | Gate landing behind human review: draft PR (issue mode) or a proposed branch + compare link (PR mode). Set `false` only when direct landing is intentional. |
 | `verified_commits` | `false` | Land via the GitHub App's `createCommitOnBranch` GraphQL mutation instead of `git push`, so commits show as "Verified". **Requires** `app_id`/`app_private_key` — the run fails loudly if set without App auth (no silent fallback to unsigned commits). **Limitation:** the mutation has no file-mode field, so executable-bit/symlink changes are not preserved (files always land as mode `100644`). |
-| `apply_suggestions` | `false` | Make every review run also apply its own single-line `suggestion`s directly (grouped by file, applied highest-line-first) and land them as a commit — findings without a clean single-line suggestion still surface as comments. A mention of "review and fix this PR" does this regardless of this input. |
+| `protected_paths` | — | Comma/newline-separated repository-relative globs that must never be published. This extends the immutable floor protecting `.deepagents/**` and recognized deep-agent config paths. |
 
 ### Triage (opt-in)
 
@@ -82,13 +82,14 @@ The deny-list always wins: a command on both lists is blocked. See [security.md]
 |---|---|---|
 | `github_token` | `${{ github.token }}` | Token for GitHub API/git. PRs opened with the default token don't trigger downstream CI. |
 | `app_id` / `app_private_key` | — | A GitHub App identity (mints a scoped, short-lived token). Use when you need the agent's PRs to run CI. Also read from `APP_ID` / `APP_PRIVATE_KEY`. |
-| `require_push_approval` | `false` | When `true`, changes land as a draft PR (issue mode) or a proposed branch + compare link (PR mode) instead of landing directly. |
+| `require_push_approval` | `true` | When `true`, changes land as a draft PR (issue mode) or a proposed branch + compare link (PR mode) instead of landing directly. |
+| `protected_paths` | — | Additional repository-relative paths the agent may never publish. |
 
 > **Letting `GITHUB_TOKEN` open PRs.** With the default token you must enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"**, or the run fails with _"GitHub Actions is not permitted to create or approve pull requests"_. A GitHub App identity avoids this. See [troubleshooting](troubleshooting.md#github-actions-is-not-permitted-to-create-or-approve-pull-requests).
 
 ### Cost & runtime controls
 
-All are unset by default (no cap). A cap is metered across **every** model call — the main agent and its subagents — and aborts the run the instant a ceiling is crossed; the partial work then lands through the approval path (a draft PR / proposed branch) for review, and the matching output (`budget_stopped` or `timed_out`) is set to `true`. Tool interrupts use the separate `interrupted` output. A no-progress loop or recursion ceiling sets `stalled` instead.
+All are unset by default (no cap). A cap is metered across **every** model call — the main agent and its subagents — and aborts the run the instant a ceiling is crossed; the partial work then lands through the approval path (a draft PR / proposed branch) for review, and the matching output (`budget_stopped` or `timed_out`) is set to `true`. A no-progress loop or recursion ceiling sets `stalled` instead.
 
 | Input | Default | Notes |
 |---|---|---|
@@ -104,14 +105,13 @@ A malformed value (e.g. `"$5"` or a negative number) fails the run loudly rather
 |---|---|---|
 | `mcp_config` | — | MCP servers JSON (see [mcp-tools.yml](../examples/mcp-tools.yml)). |
 | `harness_profile` | — | Strict JSON deepagents harness profile. Supports prompt suffixes, tool-description overrides, excluded tools/middleware, and general-purpose subagent settings. |
-| `filesystem_permissions` | — | Strict JSON array of deepagents filesystem rules. Paths must be absolute globs; writes under `.deepagents/` are always denied. |
-| `interrupt_on` | — | Strict JSON map of tool names to `true`, `false`, or an `allowedDecisions` object. Configured MCP tools default to `true`. |
-| `subagents` | — | Strict JSON array of synchronous specialist declarations. See [Specialist subagents](#specialist-subagents). |
+| `filesystem_permissions` | — | Strict JSON array of deepagents filesystem rules. Paths must be absolute globs; built-in filesystem writes under `.deepagents/` are always denied. |
+| `subagents` | — | Strict JSON array of synchronous specialist declarations. Every specialist must explicitly list the MCP tools it may use. See [Specialist subagents](#specialist-subagents). |
 | `comment_debounce_ms` | `8000` | Minimum interval between edits to the sticky progress comment. |
 | `recursion_limit` | `150` | Max agent super-steps per run. A long read → edit → test → fix loop can reach the ceiling; raise it only when the work is making progress. |
 | `max_repeated_tool_calls` | `8` | Stops an agent after this many identical tool calls without a main-agent todo update. Arguments are compared in memory only and are never added to the public tracking comment. |
 
-### Deepagents memory, skills, and approval
+### Deepagents memory and skills
 
 The action automatically discovers only these repository-local sources:
 
@@ -120,28 +120,15 @@ The action automatically discovers only these repository-local sources:
 .deepagents/skills/<skill-name>/SKILL.md
 ```
 
-`AGENTS.md` is loaded as always-on project guidance. Skills are loaded progressively: the agent receives their metadata first and reads a full `SKILL.md` only when the task needs it. These `.deepagents` paths are the only repository guidance sources loaded by the harness. The built-in deepagents filesystem tools cannot write under `.deepagents/`; shell policy is enforced separately at the shared backend for the main agent and delegated subagents. It filters commands but does not sandbox allowed processes.
+`AGENTS.md` is loaded as always-on project guidance. Skills are loaded progressively: the agent receives their metadata first and reads a full `SKILL.md` only when the task needs it. These `.deepagents` paths are the only repository guidance sources loaded by the harness. Built-in Deep Agents filesystem permissions do not constrain shell execution; the action therefore prevents protected paths from being published after either landing path, while command policy remains a separate guardrail rather than a process sandbox.
 
-The action's existing sticky-comment memory remains the durable per-issue/PR conversation history. It is separate from repository guidance. The action does not configure a deepagents checkpointer or store because a GitHub runner is ephemeral; an interrupt therefore stops safely and the next `@agent resume` starts a fresh run on the existing branch with the prior comment memory.
-
-When MCP tools are loaded, each tool is interrupted before execution by default. Set an explicit tool to `false` to allow it, or supply an object such as:
-
-```json
-{
-  "publish_release": {
-    "allowedDecisions": ["approve", "reject"],
-    "description": "Review the release publication."
-  }
-}
-```
-
-An interrupted run emits `status: interrupted`, `interrupted: true`, and pending tool metadata in `result_json`; partial work is forced through the existing approval path. The safe continuation is a new invocation: review the pending request, then comment `@agent resume`. The new run reuses the existing branch and sticky-comment memory; it does not resume the stopped runner process.
+The action's existing sticky-comment memory remains the durable per-issue/PR conversation history. It is separate from repository guidance. MCP servers are workflow-owner configuration and may have their own side effects; use only deliberately scoped servers and rely on approval-gated landing for repository changes.
 
 ### Specialist subagents
 
-`subagents` opts into named **synchronous** specialists for focused implement-mode work. Each item requires `name`, `description`, and `systemPrompt` (or YAML `system_prompt`). It may select a statically configured provider model, named MCP tools, paths below `/.deepagents/skills/`, deny-only filesystem rules, and a `findings` structured response.
+`subagents` opts into named **synchronous** specialists for focused implement-mode work. Each item requires `name`, `description`, `systemPrompt` (or YAML `system_prompt`), and a non-empty `mcpTools` allow-list. It may select a statically configured provider model, paths below `/.deepagents/skills/`, deny-only filesystem rules, and a `findings` structured response.
 
-The built-in `general-purpose` subagent cannot be replaced. Referenced MCP tools must exist, specialist MCP calls use the same interrupt policy (and default to approval), and a specialist cannot broaden the main agent's filesystem access. Specialists are not enabled in review mode. Async subagents, external sandbox backends, durable stores, and interpreter tools remain unconfigured because they require separate infrastructure or alter the action's approval boundary.
+The built-in `general-purpose` subagent cannot be replaced. Referenced MCP tools must exist, and a specialist cannot broaden the main agent's filesystem access. Specialists are not enabled in review mode.
 
 ---
 
@@ -166,7 +153,7 @@ Resolution order for the provider key: `provider_api_key` input → `PROVIDER_AP
 
 ## Per-repo config file
 
-Commit an optional config file to tune the agent per repository without touching the workflow. The action reads the first that exists:
+Commit an optional guidance file to add repository-specific instructions without giving repository content authority over execution or security policy. The action reads the first that exists:
 
 ```
 .github/deep-agent.yml
@@ -181,15 +168,6 @@ Source of truth: [`src/config/repoConfig.ts`](../src/config/repoConfig.ts).
 | Field | Type | Effect |
 |---|---|---|
 | `system_prompt` | string | Extra instructions appended to the agent's base system prompt. |
-| `model` | string | Overrides the workflow's `model` input. |
-| `allowed_commands` | string[] | **Replaces** the allow-list (workflow input or default). |
-| `denied_commands` | string[] | **Merged into** the deny-list. |
-| `auto_run_label` | string | Overrides the workflow's `auto_run_label` input. |
-| `auto_run_assignee` | string | Overrides the workflow's `auto_run_assignee` input. |
-| `harness_profile` | mapping | Deepagents harness profile. Invalid repository values are ignored; an explicit workflow input wins. |
-| `filesystem_permissions` | mapping[] | Deepagents filesystem permission rules. The action always prepends a deny rule for writes under `.deepagents/`. |
-| `interrupt_on` | mapping | Deepagents HITL tool policy. Configured MCP tools still default to interruption. |
-| `subagents` | mapping[] | Synchronous specialist declarations. Invalid repository values are ignored; an explicit workflow input wins. |
 
 ### Example
 
@@ -198,29 +176,6 @@ Source of truth: [`src/config/repoConfig.ts`](../src/config/repoConfig.ts).
 system_prompt: |
   This is a TypeScript monorepo managed with pnpm. Always co-locate tests with
   the code they cover, and never edit files under generated/.
-model: claude-sonnet-4-6
-allowed_commands: [git, pnpm, node, pytest]
-denied_commands: [rm]
-harness_profile:
-  systemPromptSuffix: "Prefer the repository's established patterns."
-filesystem_permissions:
-  - operations: [read]
-    paths: ["/src/**"]
-interrupt_on:
-  publish_release: true
-subagents:
-  - name: release-reviewer
-    description: Review release readiness.
-    system_prompt: Report concise, actionable findings only.
-    mcp_tools: [publish_release]
-    response_mode: findings
 ```
 
-### Merge rules
-
-- Repo config is applied on top of the workflow inputs for the original tuning fields.
-- `model` and `allowed_commands` **override** the input-derived values when present.
-- For `harness_profile`, `filesystem_permissions`, `interrupt_on`, and `subagents`, an explicitly supplied workflow input wins; repository values are defaults.
-- `denied_commands` is **always re-merged** with the built-in deny-list — a committed config can only strengthen the deny-list, never weaken it.
-- The `.deepagents/` write-protection floor is always prepended, even when custom filesystem rules allow broader writes.
-- A missing or malformed file is ignored (a warning is logged); it never aborts a run.
+Unknown fields are ignored. Put model choice, shell policy, budgets, MCP configuration, filesystem permissions, subagents, and landing policy in the workflow that invokes the action.
