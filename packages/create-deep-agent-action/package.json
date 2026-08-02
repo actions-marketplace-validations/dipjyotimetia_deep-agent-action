@@ -1,6 +1,6 @@
 {
   "name": "create-deep-agent-action",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Create a secure starter workflow for Deep Agent Action.",
   "license": "MIT",
   "repository": {

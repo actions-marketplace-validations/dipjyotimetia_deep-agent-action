@@ -49,7 +49,7 @@ describe("create-deep-agent-action", () => {
     expect(result.exitCode).toBe(0);
     const workflow = readFileSync(join(root, ".github/workflows/deep-agent.yml"), "utf8");
     expect(workflow).toContain(
-      "uses: dipjyotimetia/deep-agent-action@0aa91d295a53e472b0a8703d23c3cfc842164270",
+      "uses: dipjyotimetia/deep-agent-action@0e5409467f50a5b8cddf3109478a3ee477335757",
     );
     expect(workflow).toContain('model: "claude-sonnet-5"');
     expect(workflow).toContain("require_push_approval: true");

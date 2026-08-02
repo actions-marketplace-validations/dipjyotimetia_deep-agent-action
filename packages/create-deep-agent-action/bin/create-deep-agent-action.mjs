@@ -6,7 +6,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { spawnSync } from "node:child_process";
 
-const ACTION_REF = "0aa91d295a53e472b0a8703d23c3cfc842164270";
+const ACTION_REF = "0e5409467f50a5b8cddf3109478a3ee477335757";
 const DEFAULTS = {
   directory: process.cwd(),
   model: "claude-sonnet-5",
