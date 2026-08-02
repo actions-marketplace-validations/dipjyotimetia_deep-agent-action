@@ -1,0 +1,17 @@
+{
+  "name": "create-deep-agent-action",
+  "version": "0.1.0",
+  "description": "Create a secure starter workflow for Deep Agent Action.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "create-deep-agent-action": "bin/create-deep-agent-action.mjs"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

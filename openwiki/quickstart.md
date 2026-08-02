@@ -27,8 +27,19 @@ The agent itself is the [`deepagents`](https://www.npmjs.com/package/deepagents)
 - **Shell guardrails** — backend-enforced command allow-list + always-on deny-list shared by main/subagents; secret-free shell environment. This is a guardrail, not a process sandbox.
 - **MCP tools** — connect Model Context Protocol servers to extend the agent's capabilities.
 - **Verified commits** — optionally land changes via GitHub App's `createCommitOnBranch` mutation so they show as "Verified".
+- **`npx` bootstrap** — `npx create-deep-agent-action` writes a pinned starter workflow and optional repository guidance without handling secrets or repository administration.
 
 ## Quick Setup
+
+From the root of an existing Git repository, run:
+
+```sh
+npx create-deep-agent-action
+```
+
+The creator writes `.github/workflows/deep-agent.yml` and a minimal `.deepagents/AGENTS.md` file, preserving existing files unless `--force` is supplied. It does not create provider secrets or alter Actions settings: add `PROVIDER_API_KEY` yourself and enable the repository setting that permits Actions to create pull requests when using `GITHUB_TOKEN`.
+
+To configure the workflow manually instead, follow the steps below.
 
 **1. Add the workflow** at `.github/workflows/agent.yml`:
 
@@ -87,15 +98,15 @@ The control plane in `src/index.ts` orchestrates a 9-step pipeline. The agent is
 
 ## Documentation Sections
 
-| Section | Page | What it covers |
-|---|---|---|
-| **Architecture** | [Overview](architecture/overview.md) | The 9-step control-plane pipeline, agent assembly, review-mode handoff, and critical constraints. |
-| **Architecture** | [Agent Subsystem](architecture/agent.md) | Model factory, agent assembly, streaming driver, budget metering, shell guard, MCP, system prompts. |
-| **Architecture** | [GitHub Operations](architecture/github-ops.md) | Auth, client, tracking comments, thread context, cross-run memory, git ops, verified commits, code review. |
-| **Guides** | [Configuration](guides/configuration.md) | Action inputs, env vars, per-repo config, config merge precedence, shell guardrails. |
-| **Guides** | [Security](guides/security.md) | Layered guardrail model: actor validation, fork protection, secret-free shell, command guardrails, approval gate, auditability. |
-| **Guides** | [Testing](guides/testing.md) | Unit tests, CI pipeline, live E2E harness, smoke check, result validator. |
-| **Reference** | [Source Map](reference/source-map.md) | Concise map of all source files with one-line descriptions. |
+| Section          | Page                                            | What it covers                                                                                                                  |
+| ---------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Architecture** | [Overview](architecture/overview.md)            | The 9-step control-plane pipeline, agent assembly, review-mode handoff, and critical constraints.                               |
+| **Architecture** | [Agent Subsystem](architecture/agent.md)        | Model factory, agent assembly, streaming driver, budget metering, shell guard, MCP, system prompts.                             |
+| **Architecture** | [GitHub Operations](architecture/github-ops.md) | Auth, client, tracking comments, thread context, cross-run memory, git ops, verified commits, code review.                      |
+| **Guides**       | [Configuration](guides/configuration.md)        | Action inputs, env vars, per-repo config, config merge precedence, shell guardrails.                                            |
+| **Guides**       | [Security](guides/security.md)                  | Layered guardrail model: actor validation, fork protection, secret-free shell, command guardrails, approval gate, auditability. |
+| **Guides**       | [Testing](guides/testing.md)                    | Unit tests, CI pipeline, live E2E harness, smoke check, result validator.                                                       |
+| **Reference**    | [Source Map](reference/source-map.md)           | Concise map of all source files with one-line descriptions.                                                                     |
 
 ## Runtime & Tooling
 
@@ -106,7 +117,7 @@ The control plane in `src/index.ts` orchestrates a 9-step pipeline. The agent is
 
 ## Backlog
 
-| Area | Source anchor | Reason deferred |
-|---|---|---|
-| Deepagents harness internals | `node_modules/deepagents/` | Third-party library; documented via public npm docs, not this repo's source. |
-| Triage mode deep-dive | `src/modes/triage.ts` | Covered briefly in architecture overview; a dedicated page would duplicate existing docs/security.md content. |
+| Area                         | Source anchor              | Reason deferred                                                                                               |
+| ---------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Deepagents harness internals | `node_modules/deepagents/` | Third-party library; documented via public npm docs, not this repo's source.                                  |
+| Triage mode deep-dive        | `src/modes/triage.ts`      | Covered briefly in architecture overview; a dedicated page would duplicate existing docs/security.md content. |
