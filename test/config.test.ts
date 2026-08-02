@@ -118,6 +118,28 @@ describe("loadConfig recursion limit", () => {
   });
 });
 
+describe("loadConfig v2 landing defaults", () => {
+  test("approval-gates landing and keeps the immutable protected-path floor", () => {
+    delete process.env.INPUT_REQUIRE_PUSH_APPROVAL;
+    delete process.env.INPUT_PROTECTED_PATHS;
+    const config = loadConfig();
+    expect(config.requirePushApproval).toBe(true);
+    expect(config.protectedPaths).toContain(".deepagents/**");
+
+    process.env.INPUT_REQUIRE_PUSH_APPROVAL = "false";
+    process.env.INPUT_PROTECTED_PATHS = ".github/workflows/**";
+    try {
+      const configured = loadConfig();
+      expect(configured.requirePushApproval).toBe(false);
+      expect(configured.protectedPaths).toContain(".github/workflows/**");
+      expect(configured.protectedPaths).toContain(".deepagents/**");
+    } finally {
+      delete process.env.INPUT_REQUIRE_PUSH_APPROVAL;
+      delete process.env.INPUT_PROTECTED_PATHS;
+    }
+  });
+});
+
 describe("loadConfig repeated tool-call limit", () => {
   test("defaults to 8, honors an override, and rejects invalid values", () => {
     delete process.env.INPUT_MAX_REPEATED_TOOL_CALLS;
@@ -146,24 +168,21 @@ describe("loadConfig runner timing inputs", () => {
 });
 
 describe("loadConfig deepagents policy", () => {
-  test("loads strict profile, permission, and interrupt JSON inputs", () => {
+  test("loads strict profile and permission JSON inputs", () => {
     process.env.INPUT_HARNESS_PROFILE = JSON.stringify({
       systemPromptSuffix: "Use the repository conventions.",
     });
     process.env.INPUT_FILESYSTEM_PERMISSIONS = JSON.stringify([
       { operations: ["read"], paths: ["/src/**"] },
     ]);
-    process.env.INPUT_INTERRUPT_ON = JSON.stringify({ publish_release: true });
 
     try {
       const config = loadConfig();
       expect(config.harnessProfile?.systemPromptSuffix).toBe("Use the repository conventions.");
       expect(config.filesystemPermissions).toEqual([{ operations: ["read"], paths: ["/src/**"] }]);
-      expect(config.interruptOn).toEqual({ publish_release: true });
     } finally {
       delete process.env.INPUT_HARNESS_PROFILE;
       delete process.env.INPUT_FILESYSTEM_PERMISSIONS;
-      delete process.env.INPUT_INTERRUPT_ON;
     }
   });
 
@@ -173,6 +192,7 @@ describe("loadConfig deepagents policy", () => {
         name: "release-reviewer",
         description: "Reviews releases.",
         systemPrompt: "Report concise findings.",
+        mcpTools: ["publish_release"],
         responseMode: "findings",
       },
     ]);
@@ -183,6 +203,7 @@ describe("loadConfig deepagents policy", () => {
           name: "release-reviewer",
           description: "Reviews releases.",
           systemPrompt: "Report concise findings.",
+          mcpTools: ["publish_release"],
           responseMode: "findings",
         },
       ]);

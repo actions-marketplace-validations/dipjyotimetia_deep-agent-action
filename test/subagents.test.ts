@@ -18,6 +18,7 @@ const base: DeepAgentSubagentConfig = {
   name: "release-reviewer",
   description: "Reviews release readiness.",
   systemPrompt: "Review releases and report concise findings.",
+  mcpTools: ["publish_release"],
 };
 
 describe("deepagents specialist subagents", () => {
@@ -31,7 +32,6 @@ describe("deepagents specialist subagents", () => {
             system_prompt: "Review releases and report concise findings.",
             mcp_tools: ["publish_release"],
             skills: ["/.deepagents/skills/release/"],
-            interrupt_on: { publish_release: { allowedDecisions: ["approve", "reject"] } },
             filesystem_permissions: [
               { operations: ["write"], paths: ["/generated/**"], mode: "deny" },
             ],
@@ -44,11 +44,15 @@ describe("deepagents specialist subagents", () => {
         ...base,
         mcpTools: ["publish_release"],
         skills: ["/.deepagents/skills/release/"],
-        interruptOn: { publish_release: { allowedDecisions: ["approve", "reject"] } },
         filesystemPermissions: [{ operations: ["write"], paths: ["/generated/**"], mode: "deny" }],
         responseMode: "findings",
       },
     ]);
+  });
+
+  test("requires an explicit MCP tool allow-list", () => {
+    const { mcpTools: _mcpTools, ...withoutTools } = base;
+    expect(() => parseSubagents(JSON.stringify([withoutTools]))).toThrow("mcpTools");
   });
 
   test("rejects reserved names and any configuration that can broaden filesystem access", () => {
@@ -82,7 +86,7 @@ describe("deepagents specialist subagents", () => {
     ).toThrow("duplicates");
   });
 
-  test("resolves only configured MCP tools, preserves the security floor, and defaults them to interrupt", () => {
+  test("resolves only configured MCP tools and preserves the security floor", () => {
     const resolved = resolveSubagents(
       [
         {
@@ -104,7 +108,6 @@ describe("deepagents specialist subagents", () => {
 
     expect(resolved).toHaveLength(1);
     expect(resolved[0]?.tools?.map((tool) => tool.name)).toEqual(["publish_release"]);
-    expect(resolved[0]?.interruptOn).toEqual({ publish_release: true });
     expect(resolved[0]?.permissions).toEqual([
       { operations: ["write"], paths: ["/.deepagents/**"], mode: "deny" },
       { operations: ["write"], paths: ["/generated/**"], mode: "deny" },

@@ -35,17 +35,12 @@ inputs:
   filesystem_permissions:
     description: >-
       Optional deepagents filesystem permission rules JSON. Each rule has operations (read/write), absolute
-      glob paths, and optional mode (allow/deny). Repository .deepagents memory/skills remain write-protected.
-    required: false
-  interrupt_on:
-    description: >-
-      Optional deepagents HITL interrupt policy JSON mapping tool names to true/false or an allowedDecisions
-      object. MCP tools require approval by default; an explicit false disables that default.
+      glob paths, and optional mode (allow/deny). Built-in filesystem writes under .deepagents stay denied.
     required: false
   subagents:
     description: >-
       Optional specialist-subagent JSON. Each item requires name, description, and systemPrompt; it may select
-      MCP tools, repository .deepagents skills, restrictive filesystem deny rules, interrupt rules, a model, and
+      explicit MCP tools, repository .deepagents skills, restrictive filesystem deny rules, a model, and
       responseMode: findings. The built-in general-purpose subagent cannot be replaced.
     required: false
   allowed_permissions:
@@ -97,20 +92,18 @@ inputs:
   require_push_approval:
     description: "Gate landing of changes behind human review: opens a draft PR (issue mode) or pushes a proposed branch with a compare link (PR mode)."
     required: false
-    default: "false"
+    default: "true"
+  protected_paths:
+    description: >-
+      Comma/newline-separated repository-relative globs for additional files the agent may never publish.
+      Repository .deepagents guidance and deep-agent config paths are always protected.
+    required: false
   verified_commits:
     description: >-
       Land commits via the GitHub App's createCommitOnBranch GraphQL mutation so they show as
       "Verified" on GitHub, instead of a plain git push. Requires app_id + app_private_key; the
       run fails loudly if set without App auth. Limitation: executable-bit/symlink changes are
       not preserved (files always land as mode 100644).
-    required: false
-    default: "false"
-  apply_suggestions:
-    description: >-
-      Make every review run also apply its own single-line suggestions directly and land them as
-      a commit, instead of only leaving comments. A mention of "review and fix" always does this
-      regardless of this input.
     required: false
     default: "false"
   enable_triage:
@@ -144,21 +137,10 @@ inputs:
     description: "Stop when the same tool call repeats without todo progress. Default 8; raise only for intentional repeated operations."
     required: false
     default: "8"
-  # --- Reserved for future phases (declared so the input surface is intentional) ---
-  execution_mode:
-    description: "Reserved. Only 'in_runner' is implemented in v1; 'bridge' (hosted Open SWE) is planned (P1)."
-    required: false
-    default: "in_runner"
-  langgraph_url:
-    description: "Reserved for bridge mode (P1)."
-    required: false
-  assistant_id:
-    description: "Reserved for bridge mode (P1)."
-    required: false
 
 outputs:
   status:
-    description: "Run outcome: success | skipped | refused | failed | interrupted."
+    description: "Run outcome: success | skipped | refused | failed."
     value: ${{ steps.agent.outputs.status }}
   pr_url:
     description: "URL of the opened pull request, if any."
@@ -175,9 +157,6 @@ outputs:
   stalled:
     description: "'true' when the agent stopped after repeated no-progress tool calls or reaching its recursion ceiling; partial work is review-gated."
     value: ${{ steps.agent.outputs.stalled }}
-  interrupted:
-    description: "'true' when deepagents paused before a configured tool requiring approval."
-    value: ${{ steps.agent.outputs.interrupted }}
   audit_artifact:
     description: "Invocation-unique name of the uploaded audit-record artifact."
     value: ${{ steps.audit.outputs.artifact_name }}
@@ -222,7 +201,6 @@ runs:
         INPUT_MCP_CONFIG: ${{ inputs.mcp_config }}
         INPUT_HARNESS_PROFILE: ${{ inputs.harness_profile }}
         INPUT_FILESYSTEM_PERMISSIONS: ${{ inputs.filesystem_permissions }}
-        INPUT_INTERRUPT_ON: ${{ inputs.interrupt_on }}
         INPUT_SUBAGENTS: ${{ inputs.subagents }}
         INPUT_ALLOWED_PERMISSIONS: ${{ inputs.allowed_permissions }}
         INPUT_ALLOWED_COMMANDS: ${{ inputs.allowed_commands }}
@@ -238,8 +216,8 @@ runs:
         INPUT_APP_PRIVATE_KEY: ${{ inputs.app_private_key }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github_token }}
         INPUT_REQUIRE_PUSH_APPROVAL: ${{ inputs.require_push_approval }}
+        INPUT_PROTECTED_PATHS: ${{ inputs.protected_paths }}
         INPUT_VERIFIED_COMMITS: ${{ inputs.verified_commits }}
-        INPUT_APPLY_SUGGESTIONS: ${{ inputs.apply_suggestions }}
         INPUT_ENABLE_TRIAGE: ${{ inputs.enable_triage }}
         INPUT_TRIAGE_ALLOWED_LABELS: ${{ inputs.triage_allowed_labels }}
         INPUT_TRIAGE_MODEL: ${{ inputs.triage_model }}
@@ -248,9 +226,6 @@ runs:
         INPUT_MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes }}
         INPUT_RECURSION_LIMIT: ${{ inputs.recursion_limit }}
         INPUT_MAX_REPEATED_TOOL_CALLS: ${{ inputs.max_repeated_tool_calls }}
-        INPUT_EXECUTION_MODE: ${{ inputs.execution_mode }}
-        INPUT_LANGGRAPH_URL: ${{ inputs.langgraph_url }}
-        INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}
 
     # Publish the audit record written by this invocation. The UUID suffix
     # prevents parallel or matrix jobs and repeated action steps from replacing

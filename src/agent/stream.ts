@@ -13,19 +13,12 @@ export interface StreamResult {
   todos: TodoItem[];
   summary: string;
   tokens: TokenUsage;
-  /** Set when the run was aborted early by a budget, runtime, or HITL ceiling. */
+  /** Set when the run was aborted early by a budget, runtime, or loop ceiling. */
   stopped?: StopReason;
   /** Safe, human-readable explanation for a deliberate stalled stop. */
   stopDetail?: string;
-  /** Tool requests held by the deepagents HITL middleware. */
-  pendingInterrupts?: PendingToolRequest[];
   /** Deduplicated tool activity observed across main and subagent streams. */
   activities: StreamActivity[];
-}
-
-export interface PendingToolRequest {
-  name: string;
-  args?: unknown;
 }
 
 export interface StreamActivity {
@@ -69,25 +62,6 @@ function mapTodos(raw: unknown): TodoItem[] {
       status: String(r.status ?? "pending"),
     };
   });
-}
-
-function mapPendingInterrupts(raw: unknown): PendingToolRequest[] | undefined {
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const requests: PendingToolRequest[] = [];
-  for (const item of raw) {
-    const value = (item ?? {}) as { value?: unknown };
-    const interruptValue = (value.value ?? {}) as { actionRequests?: unknown };
-    if (!Array.isArray(interruptValue.actionRequests)) continue;
-    for (const action of interruptValue.actionRequests) {
-      const request = (action ?? {}) as { name?: unknown; args?: unknown };
-      if (typeof request.name !== "string" || !request.name) continue;
-      requests.push({
-        name: request.name,
-        ...(request.args !== undefined ? { args: request.args } : {}),
-      });
-    }
-  }
-  return requests.length ? requests : [];
 }
 
 function messageActivities(messages: BaseMessage[], namespace: string[]): StreamActivity[] {
@@ -194,8 +168,6 @@ export async function runAgentStream(
   let finalMessages: BaseMessage[] = [];
   let lastMirrorKey = "";
   let lastMirrorAt = 0;
-  let interrupted = false;
-  let pendingInterrupts: PendingToolRequest[] | undefined;
   const activities: StreamActivity[] = [];
   const activityKeys = new Set<string>();
   const repeatedToolCallKeys = new Set<string>();
@@ -236,12 +208,7 @@ export async function runAgentStream(
     for await (const item of stream) {
       const { namespace, state } = extractState(item);
       if (!state || typeof state !== "object") continue;
-      const s = state as { todos?: unknown; messages?: unknown; __interrupt__?: unknown };
-      const stateInterrupts = mapPendingInterrupts(s.__interrupt__);
-      if (stateInterrupts !== undefined) {
-        interrupted = true;
-        pendingInterrupts = stateInterrupts;
-      }
+      const s = state as { todos?: unknown; messages?: unknown };
       const stateMessages = Array.isArray(s.messages) ? s.messages.filter(isBaseMessage) : [];
       if (namespace.length === 0 && Array.isArray(s.todos)) {
         const nextTodos = mapTodos(s.todos);
@@ -325,11 +292,8 @@ export async function runAgentStream(
     todos,
     summary: lastAiText(finalMessages),
     tokens,
-    stopped:
-      meter?.stopped ??
-      (timedOut ? "timeout" : stalled ? "stalled" : interrupted ? "interrupt" : undefined),
+    stopped: meter?.stopped ?? (timedOut ? "timeout" : stalled ? "stalled" : undefined),
     ...(stopDetail ? { stopDetail } : {}),
-    ...(pendingInterrupts !== undefined ? { pendingInterrupts } : {}),
     activities,
   };
 }

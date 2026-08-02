@@ -1,12 +1,8 @@
 import * as core from "@actions/core";
 import type { Config } from "./types.js";
-import type { RepoConfig } from "./config/repoConfig.js";
-import {
-  parseFilesystemPermissions,
-  parseHarnessProfile,
-  parseInterruptPolicy,
-} from "./agent/policy.js";
+import { parseFilesystemPermissions, parseHarnessProfile } from "./agent/policy.js";
 import { parseSubagents } from "./agent/subagents.js";
+import { DEFAULT_PROTECTED_PATHS, parseProtectedPaths } from "./github/protectedPaths.js";
 
 /** Default shell commands the agent is allowed to run. */
 export const DEFAULT_ALLOWED_COMMANDS = [
@@ -156,17 +152,19 @@ export function loadConfig(): Config {
     autoRunLabel: core.getInput("auto_run_label") || undefined,
     autoRunAssignee: core.getInput("auto_run_assignee") || undefined,
     autoRunDefaultInstruction: core.getInput("auto_run_default_instruction") || undefined,
-    requirePushApproval: parseBool(core.getInput("require_push_approval")),
+    requirePushApproval: parseBool(core.getInput("require_push_approval") || "true"),
     verifiedCommits: parseBool(core.getInput("verified_commits")),
-    applySuggestions: parseBool(core.getInput("apply_suggestions")),
     enableTriage: parseBool(core.getInput("enable_triage")),
     triageAllowedLabels: parseList(core.getInput("triage_allowed_labels")),
     triageModel: core.getInput("triage_model") || undefined,
     mcpConfig: core.getInput("mcp_config") || "",
     harnessProfile: parseHarnessProfile(core.getInput("harness_profile")),
     filesystemPermissions: parseFilesystemPermissions(core.getInput("filesystem_permissions")),
-    interruptOn: parseInterruptPolicy(core.getInput("interrupt_on")),
     subagents: parseSubagents(core.getInput("subagents")),
+    protectedPaths: [
+      ...DEFAULT_PROTECTED_PATHS,
+      ...parseProtectedPaths(core.getInput("protected_paths")),
+    ],
     shellTimeoutSeconds:
       parsePositiveInteger(core.getInput("shell_timeout_seconds"), "shell_timeout_seconds") ?? 600,
     commentDebounceMs:
@@ -182,26 +180,6 @@ export function loadConfig(): Config {
     maxRepeatedToolCalls:
       parsePositiveInteger(core.getInput("max_repeated_tool_calls"), "max_repeated_tool_calls") ??
       8,
-  };
-}
-
-/**
- * Apply per-repo overrides on top of the input-derived config. A repo file may
- * narrow/extend the allow-list and change the model, but the built-in
- * deny-list is always re-merged so a committed config cannot weaken it.
- */
-export function mergeRepoConfig(base: Config, repo: RepoConfig): Config {
-  return {
-    ...base,
-    model: repo.model ? normalizeModel(repo.model).full : base.model,
-    allowedCommands: repo.allowedCommands?.length ? repo.allowedCommands : base.allowedCommands,
-    deniedCommands: [...new Set([...base.deniedCommands, ...(repo.deniedCommands ?? [])])],
-    autoRunLabel: repo.autoRunLabel ?? base.autoRunLabel,
-    autoRunAssignee: repo.autoRunAssignee ?? base.autoRunAssignee,
-    harnessProfile: base.harnessProfile ?? repo.harnessProfile,
-    filesystemPermissions: base.filesystemPermissions ?? repo.filesystemPermissions,
-    interruptOn: base.interruptOn ?? repo.interruptOn,
-    subagents: base.subagents ?? repo.subagents,
   };
 }
 

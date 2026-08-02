@@ -8,6 +8,7 @@ type Step = {
   env?: Record<string, string>;
   uses?: string;
   with?: Record<string, unknown>;
+  "continue-on-error"?: boolean;
 };
 
 function workflow(path: string): any {
@@ -45,6 +46,31 @@ describe("composite action metadata", () => {
     expect(metadata.outputs.stalled.value).toBe("${{ steps.agent.outputs.stalled }}");
   });
 
+  test("defaults landing to approval and forwards protected paths", () => {
+    const run = steps.find((step) => step.name === "Run Deep Agent");
+
+    expect(metadata.inputs.require_push_approval.default).toBe("true");
+    expect(metadata.inputs.protected_paths).toBeDefined();
+    expect(run?.env?.INPUT_PROTECTED_PATHS).toBe("${{ inputs.protected_paths }}");
+  });
+
+  test("does not advertise inert bridge, HITL, or global review-mutation controls", () => {
+    const run = steps.find((step) => step.name === "Run Deep Agent");
+
+    for (const input of [
+      "execution_mode",
+      "langgraph_url",
+      "assistant_id",
+      "interrupt_on",
+      "apply_suggestions",
+    ]) {
+      expect(metadata.inputs[input]).toBeUndefined();
+    }
+    expect(metadata.outputs.interrupted).toBeUndefined();
+    expect(run?.env?.INPUT_INTERRUPT_ON).toBeUndefined();
+    expect(run?.env?.INPUT_APPLY_SUGGESTIONS).toBeUndefined();
+  });
+
   test("exposes and forwards specialist subagent configuration", () => {
     const run = steps.find((step) => step.name === "Run Deep Agent");
 
@@ -74,5 +100,16 @@ describe("dispatch E2E metadata", () => {
 
     expect(download?.with?.name).toBe("${{ steps.agent.outputs.audit_artifact }}");
     expect(validate?.run).toContain("${{ steps.agent.outputs.audit_artifact }}.json");
+  });
+
+  test("exercises protected-path refusal against the shipped action", () => {
+    const protectedPath = e2e.jobs["protected-path"];
+    const steps = protectedPath.steps as Step[];
+    const run = steps.find((step) => step.name === "Attempt protected guidance change");
+    const assertion = steps.find((step) => step.name === "Assert protected-path refusal");
+
+    expect(run?.["continue-on-error"]).toBe(true);
+    expect(run?.with?.prompt).toContain(".deepagents/E2E_PROTECTED.md");
+    expect(assertion?.run).toContain("Refusing to publish protected paths");
   });
 });

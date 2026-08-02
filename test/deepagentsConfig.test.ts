@@ -10,11 +10,9 @@ import { ChatVertexAI } from "@langchain/google-vertexai";
 import { getHarnessProfile } from "deepagents";
 import {
   buildFilesystemPermissions,
-  buildInterruptPolicy,
   discoverDeepAgentSources,
   parseFilesystemPermissions,
   parseHarnessProfile,
-  parseInterruptPolicy,
 } from "../src/agent/policy.js";
 import { buildAgent, resolveAgentPolicy } from "../src/agent/createAgent.js";
 
@@ -59,29 +57,6 @@ describe("deepagents policy parsing", () => {
       ),
     ).toThrow("filesystem_permissions");
   });
-
-  test("parses JSON interrupt rules with explicit allowed decisions", () => {
-    expect(
-      parseInterruptPolicy(
-        JSON.stringify({
-          publish_release: {
-            allowedDecisions: ["approve", "reject"],
-            description: "Review the release publication.",
-          },
-        }),
-        "interrupt_on",
-      ),
-    ).toEqual({
-      publish_release: {
-        allowedDecisions: ["approve", "reject"],
-        description: "Review the release publication.",
-      },
-    });
-
-    expect(() => parseInterruptPolicy('{"publish_release": {}}', "interrupt_on")).toThrow(
-      "interrupt_on",
-    );
-  });
 });
 
 describe("deepagents policy defaults", () => {
@@ -113,19 +88,6 @@ describe("deepagents policy defaults", () => {
     });
   });
 
-  test("interrupts all MCP tools by default and lets explicit rules override them", () => {
-    expect(
-      buildInterruptPolicy(["search_web", "publish_release"], {
-        search_web: false,
-        custom_tool: true,
-      }),
-    ).toEqual({
-      search_web: false,
-      publish_release: true,
-      custom_tool: true,
-    });
-  });
-
   test("assembles the discovered sources and policy for the agent", () => {
     const root = mkdtempSync(join(tmpdir(), "deep-agent-policy-"));
     mkdirSync(join(root, ".deepagents", "skills"), { recursive: true });
@@ -133,15 +95,12 @@ describe("deepagents policy defaults", () => {
 
     const policy = resolveAgentPolicy({
       rootDir: root,
-      mcpToolNames: ["publish_release"],
       filesystemPermissions: [{ operations: ["read"], paths: ["/src/**"] }],
-      interruptOn: { publish_release: false },
     });
 
     expect(policy.memory).toEqual(["/.deepagents/AGENTS.md"]);
     expect(policy.skills).toEqual(["/.deepagents/skills/"]);
     expect(policy.permissions[0]?.mode).toBe("deny");
-    expect(policy.interruptOn).toEqual({ publish_release: false });
   });
 
   test("registers a profile under the concrete ChatOpenAI alias", () => {
@@ -184,6 +143,7 @@ describe("deepagents policy defaults", () => {
           name: "release-reviewer",
           description: "Reviews release readiness.",
           systemPrompt: "Report concise findings only.",
+          mcpTools: [],
           model: "openai:gpt-5",
           responseMode: "findings",
         },
@@ -214,6 +174,7 @@ describe("deepagents policy defaults", () => {
             name: "release-reviewer",
             description: "Reviews release readiness.",
             systemPrompt: "Report concise findings only.",
+            mcpTools: ["publish_release"],
             model: "openai:gpt-5",
           },
         ],

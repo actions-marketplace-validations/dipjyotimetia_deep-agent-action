@@ -74,8 +74,6 @@ export interface Config {
    * Requires GitHub App auth; file-mode/symlink changes are not preserved.
    */
   verifiedCommits: boolean;
-  /** When true, every review run also applies its own single-line suggestions and lands them. */
-  applySuggestions: boolean;
   /**
    * When true, a new issue with no trigger phrase is classified by a cheap
    * one-shot model call that decides whether to open a PR, request a review,
@@ -93,10 +91,10 @@ export interface Config {
   harnessProfile?: import("deepagents").HarnessProfile;
   /** Optional validated deepagents filesystem permission rules. */
   filesystemPermissions?: import("deepagents").FilesystemPermission[];
-  /** Optional validated deepagents tool interrupt rules. */
-  interruptOn?: import("./agent/policy.js").InterruptPolicy;
   /** Optional validated synchronous specialist-subagent declarations. */
   subagents?: import("./agent/subagents.js").DeepAgentSubagentConfig[];
+  /** Immutable protected paths plus workflow-owner extensions that can never be published. */
+  protectedPaths: string[];
   shellTimeoutSeconds: number;
   /** Minimum interval between tracking-comment edits, ms. */
   commentDebounceMs: number;
@@ -119,10 +117,10 @@ export interface TokenUsage {
 }
 
 /** Outcome status surfaced as the `status` output. */
-export type RunStatus = "success" | "skipped" | "refused" | "failed" | "interrupted";
+export type RunStatus = "success" | "skipped" | "refused" | "failed";
 
 /** Why a run was deliberately stopped early (partial work lands for review). */
-export type StopReason = "budget" | "timeout" | "interrupt" | "stalled";
+export type StopReason = "budget" | "timeout" | "stalled";
 
 /** One recorded tool invocation for the audit record. */
 export interface ToolCallRecord {
@@ -153,8 +151,6 @@ export interface RunRecord {
   stopReason?: StopReason;
   /** Safe detail for a stalled stop; never contains raw tool arguments. */
   stopDetail?: string;
-  /** Tool calls held for approval when deepagents interrupted the run. */
-  pendingInterrupts?: import("./agent/stream.js").PendingToolRequest[];
   /** Deduplicated tool/subagent activity observed during the run. */
   activities?: import("./agent/stream.js").StreamActivity[];
 }

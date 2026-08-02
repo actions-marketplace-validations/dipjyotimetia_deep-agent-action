@@ -117,31 +117,6 @@ describe("runAgentStream", () => {
     expect(result.activities).toEqual(seen);
   });
 
-  test("stops cleanly and returns pending tool requests from a HITL interrupt", async () => {
-    const result = await runAgentStream(
-      fakeAgent([
-        {
-          todos: [{ content: "publish the release", status: "in_progress" }],
-          messages: [new AIMessage("I am ready to publish it.")],
-          __interrupt__: [
-            {
-              value: {
-                actionRequests: [{ name: "publish_release", args: { tag: "v1.2.3" } }],
-              },
-            },
-          ],
-        },
-      ]),
-      {},
-      opts,
-    );
-
-    expect(result.stopped).toBe("interrupt");
-    expect(result.pendingInterrupts).toEqual([
-      { name: "publish_release", args: { tag: "v1.2.3" } },
-    ]);
-  });
-
   const budget = { model: "anthropic:claude-sonnet-4-6", maxTotalTokens: 200 };
   const llmEnd = (input: number, output: number) => ({
     generations: [

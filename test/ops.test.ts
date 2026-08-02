@@ -7,7 +7,12 @@ import {
   isMissingRemoteBranchStatus,
   buildPrBody,
   reuseExistingPr,
+  stripCheckoutCredentials,
 } from "../src/github/ops.js";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { makeContext } from "./mockContext.js";
 
 describe("sanitizeBranchName", () => {
@@ -269,5 +274,24 @@ describe("explainGitHubError", () => {
     const out = explainGitHubError("git push failed: ! [rejected] main -> main (non-fast-forward)");
     expect(out).toContain("branch moved");
     expect(out).toContain("concurrency");
+  });
+});
+
+describe("stripCheckoutCredentials", () => {
+  test("removes persisted checkout credentials before the agent can run git", () => {
+    const root = mkdtempSync(join(tmpdir(), "deep-agent-git-credentials-"));
+    const git = (args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+    git(["init"]);
+    git(["remote", "add", "origin", "https://x-access-token:secret@github.com/acme/widgets.git"]);
+    git(["config", "http.https://github.com/.extraheader", "AUTHORIZATION: basic secret"]);
+    git(["config", "credential.helper", "store"]);
+
+    stripCheckoutCredentials(root, "https://github.com/acme/widgets.git");
+
+    expect(() =>
+      git(["config", "--local", "--get-all", "http.https://github.com/.extraheader"]),
+    ).toThrow();
+    expect(() => git(["config", "--local", "--get-all", "credential.helper"])).toThrow();
+    expect(git(["remote", "get-url", "origin"]).trim()).toBe("https://github.com/acme/widgets.git");
   });
 });

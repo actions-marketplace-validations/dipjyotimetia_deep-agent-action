@@ -1,6 +1,6 @@
 import type { Octokit } from "./client.js";
 import type { GitHubContext, RunStatus, StopReason, TokenUsage } from "../types.js";
-import type { PendingToolRequest, StreamActivity, TodoItem } from "../agent/stream.js";
+import type { StreamActivity, TodoItem } from "../agent/stream.js";
 import { extractMemoryBlock, renderMemoryBlock, type MemoryTurn } from "./memory.js";
 import { truncateBody, GITHUB_COMMENT_MAX_CHARS } from "./text.js";
 
@@ -9,14 +9,7 @@ const HEADER = "### 🤖 Deep Agent";
 export const MARKER = "<!-- deep-agent:tracking -->";
 
 const STATUS_MARKER_RE = /<!-- deep-agent:status:([a-z]+) -->/;
-const STATUS_VALUES = [
-  "working",
-  "success",
-  "skipped",
-  "refused",
-  "failed",
-  "interrupted",
-] as const;
+const STATUS_VALUES = ["working", "success", "skipped", "refused", "failed"] as const;
 
 function checkbox(status: string): string {
   if (status === "completed") return "- [x]";
@@ -28,7 +21,6 @@ function checkbox(status: string): string {
 export const STOP_LABELS: Record<StopReason, string> = {
   budget: "budget cap",
   timeout: "max runtime",
-  interrupt: "tool approval",
   stalled: "no-progress loop",
 };
 
@@ -49,8 +41,6 @@ export interface TrackingState {
   stopReason?: StopReason;
   /** Safe detail for a stalled stop; never includes raw tool arguments. */
   stopDetail?: string;
-  /** Tool calls held for human approval by deepagents HITL middleware. */
-  interrupts?: PendingToolRequest[];
   /** Most recent typed tool/subagent activity, shown during a working run. */
   activity?: StreamActivity;
   /** Per-thread turn history, stored as a hidden block for the next run to read. */
@@ -89,9 +79,6 @@ export function renderTrackingBody(state: TrackingState): string {
     case "failed":
       lines.push("❌ The run failed.");
       break;
-    case "interrupted":
-      lines.push("⏸️ Paused before a tool requiring approval.");
-      break;
   }
 
   if (state.todos && state.todos.length) {
@@ -117,17 +104,6 @@ export function renderTrackingBody(state: TrackingState): string {
   } else if (state.branch) {
     lines.push("", `**Branch:** \`${state.branch}\``);
   }
-  if (state.interrupts && state.interrupts.length) {
-    lines.push("", "**Pending tool approval**");
-    for (const interrupt of state.interrupts) {
-      // Tool arguments can contain user data or secrets supplied by a model.
-      // Keep the public tracking comment to the safe, actionable tool name;
-      // the structured result artifact retains the request for authorized
-      // audit consumers.
-      lines.push(`- \`${interrupt.name}\``);
-    }
-    lines.push("Review the request, then comment `@agent resume` to start a fresh run.");
-  }
   if (state.activity && state.status === "working") {
     const scope = state.activity.namespace.length
       ? `subagent:${state.activity.namespace.join("/")}`
@@ -138,10 +114,7 @@ export function renderTrackingBody(state: TrackingState): string {
     );
   }
   if (state.stopReason) {
-    const message =
-      state.stopReason === "interrupt"
-        ? "⚠️ Paused at the configured tool approval boundary — partial work was opened for review."
-        : `⚠️ Stopped at the configured ${STOP_LABELS[state.stopReason]} — any partial changes were opened for review.`;
+    const message = `⚠️ Stopped at the configured ${STOP_LABELS[state.stopReason]} — any partial changes were opened for review.`;
     lines.push("", message);
     if (state.stopReason === "stalled" && state.stopDetail) lines.push(state.stopDetail);
   }

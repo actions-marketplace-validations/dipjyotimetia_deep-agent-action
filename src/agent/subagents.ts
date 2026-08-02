@@ -2,12 +2,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import type { DynamicStructuredTool } from "@langchain/core/tools";
 import type { FilesystemPermission, SubAgent } from "deepagents";
 import { z } from "zod";
-import {
-  buildInterruptPolicy,
-  parseFilesystemPermissionsValue,
-  parseInterruptPolicyValue,
-  type InterruptPolicy,
-} from "./policy.js";
+import { parseFilesystemPermissionsValue } from "./policy.js";
 
 const RESERVED_SUBAGENT_NAMES = new Set(["general-purpose"]);
 const SUBAGENT_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -30,9 +25,9 @@ export interface DeepAgentSubagentConfig {
   description: string;
   systemPrompt: string;
   model?: string;
-  mcpTools?: string[];
+  /** Explicit MCP capability allow-list; specialists never inherit all tools. */
+  mcpTools: string[];
   skills?: string[];
-  interruptOn?: InterruptPolicy;
   /** Restrictive-only rules; custom subagents may never broaden parent access. */
   filesystemPermissions?: FilesystemPermission[];
   responseMode?: "findings";
@@ -48,8 +43,6 @@ const rawSubagentSchema = z
     mcpTools: z.array(z.string().min(1)).optional(),
     mcp_tools: z.array(z.string().min(1)).optional(),
     skills: z.array(z.string().min(1)).optional(),
-    interruptOn: z.unknown().optional(),
-    interrupt_on: z.unknown().optional(),
     filesystemPermissions: z.unknown().optional(),
     filesystem_permissions: z.unknown().optional(),
     responseMode: z.enum(["findings"]).optional(),
@@ -84,14 +77,12 @@ function parseConfig(value: unknown, name: string): DeepAgentSubagentConfig[] {
     );
     if (!systemPrompt) throw new Error(`${name}.${raw.name} requires systemPrompt.`);
     const mcpTools = oneOf({ camel: raw.mcpTools, snake: raw.mcp_tools }, "mcpTools", name);
-    if (mcpTools && new Set(mcpTools).size !== mcpTools.length) {
+    if (!mcpTools?.length) {
+      throw new Error(`${name}.${raw.name} requires a non-empty mcpTools allow-list.`);
+    }
+    if (new Set(mcpTools).size !== mcpTools.length) {
       throw new Error(`${name}.${raw.name}.mcpTools must not contain duplicates.`);
     }
-    const interruptValue = oneOf(
-      { camel: raw.interruptOn, snake: raw.interrupt_on },
-      "interruptOn",
-      name,
-    );
     const filesystemValue = oneOf(
       { camel: raw.filesystemPermissions, snake: raw.filesystem_permissions },
       "filesystemPermissions",
@@ -127,16 +118,8 @@ function parseConfig(value: unknown, name: string): DeepAgentSubagentConfig[] {
       description: raw.description,
       systemPrompt,
       model: raw.model,
-      ...(mcpTools?.length ? { mcpTools } : {}),
+      mcpTools,
       ...(raw.skills?.length ? { skills: raw.skills } : {}),
-      ...(interruptValue === undefined
-        ? {}
-        : {
-            interruptOn: parseInterruptPolicyValue(
-              interruptValue,
-              `${name}.${raw.name}.interruptOn`,
-            ),
-          }),
       ...(filesystemPermissions?.length ? { filesystemPermissions } : {}),
       ...(responseMode ? { responseMode } : {}),
     };
@@ -188,7 +171,7 @@ export function resolveSubagents(
   if (!configs?.length) return [];
   const byName = new Map(availableMcpTools.map((tool) => [tool.name, tool]));
   return configs.map((config) => {
-    const names = config.mcpTools ?? availableMcpTools.map((tool) => tool.name);
+    const names = config.mcpTools;
     const tools = names.map((name) => {
       const tool = byName.get(name);
       if (!tool)
@@ -210,7 +193,6 @@ export function resolveSubagents(
         : inheritedSkills
           ? { skills: inheritedSkills }
           : {}),
-      interruptOn: buildInterruptPolicy(names, config.interruptOn),
       ...(permissions ? { permissions } : {}),
       ...(config.responseMode === "findings" ? { responseFormat: findingsResponseFormat } : {}),
     };
