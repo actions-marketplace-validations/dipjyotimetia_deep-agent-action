@@ -3,6 +3,7 @@ import {
   currentTriageState,
   DEFAULT_TRIAGE_LABELS,
   routeTriage,
+  resolveTriageInstruction,
   stateLabelSwap,
 } from "../src/modes/triage.js";
 
@@ -16,6 +17,22 @@ describe("currentTriageState", () => {
   test("returns null when no lifecycle label is present", () => {
     expect(currentTriageState(["bug", "priority: high"])).toBeNull();
   });
+});
+
+test("triage handoff requires reproduce, diagnose, verify, and validate before a fix", () => {
+  const instruction = resolveTriageInstruction({
+    eventName: "issues",
+    owner: "owner",
+    repo: "repo",
+    actor: "alice",
+    isPR: false,
+    isPullRequestReviewComment: false,
+    labels: [],
+    triggerText: "It crashes after login.",
+    payload: {},
+  });
+  expect(instruction).toContain("reproduce the report");
+  expect(instruction).toContain("It crashes after login.");
 });
 
 describe("stateLabelSwap", () => {
@@ -43,13 +60,25 @@ describe("stateLabelSwap", () => {
 describe("routeTriage", () => {
   test("classifies newly opened issues", () => {
     expect(
-      routeTriage({ eventName: "issues", eventAction: "opened", isPR: false, labels: [], actor: "alice" }),
+      routeTriage({
+        eventName: "issues",
+        eventAction: "opened",
+        isPR: false,
+        labels: [],
+        actor: "alice",
+      }),
     ).toEqual({ type: "classify" });
   });
 
   test("ignores pull requests and bot comments", () => {
     expect(
-      routeTriage({ eventName: "issues", eventAction: "opened", isPR: true, labels: [], actor: "alice" }),
+      routeTriage({
+        eventName: "issues",
+        eventAction: "opened",
+        isPR: true,
+        labels: [],
+        actor: "alice",
+      }),
     ).toEqual({ type: "skip", reason: "pull_request" });
     expect(
       routeTriage({

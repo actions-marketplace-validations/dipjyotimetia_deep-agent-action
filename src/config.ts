@@ -193,7 +193,10 @@ export function loadConfig(): Config {
     triageLabels: loadTriageLabels(),
     triageBotLogins: parseList(core.getInput("triage_bot_logins")),
     triageMaxFailedAttempts:
-      parsePositiveInteger(core.getInput("triage_max_failed_attempts"), "triage_max_failed_attempts") ?? 3,
+      parsePositiveInteger(
+        core.getInput("triage_max_failed_attempts"),
+        "triage_max_failed_attempts",
+      ) ?? 3,
     mcpConfig: core.getInput("mcp_config") || "",
     harnessProfile: parseHarnessProfile(core.getInput("harness_profile")),
     filesystemPermissions: parseFilesystemPermissions(core.getInput("filesystem_permissions")),

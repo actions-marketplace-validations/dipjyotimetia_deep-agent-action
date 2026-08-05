@@ -164,7 +164,9 @@ describe("loadConfig triage lifecycle", () => {
   test("uses the visible lifecycle defaults and validates its bounded retry limit", () => {
     delete process.env.INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION;
     delete process.env.INPUT_TRIAGE_MAX_FAILED_ATTEMPTS;
-    expect(loadConfig().triageLabels.needsReproduction).toBe(DEFAULT_TRIAGE_LABELS.needsReproduction);
+    expect(loadConfig().triageLabels.needsReproduction).toBe(
+      DEFAULT_TRIAGE_LABELS.needsReproduction,
+    );
     expect(loadConfig().triageMaxFailedAttempts).toBe(3);
 
     process.env.INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION = "state: more info";
