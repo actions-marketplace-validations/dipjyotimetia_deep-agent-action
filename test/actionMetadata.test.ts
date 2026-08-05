@@ -81,6 +81,15 @@ describe("composite action metadata", () => {
     expect(metadata.inputs.subagents).toBeDefined();
     expect(run?.env?.INPUT_SUBAGENTS).toBe("${{ inputs.subagents }}");
   });
+
+  test("exposes and forwards the opt-in triage lifecycle controls", () => {
+    const run = steps.find((step) => step.name === "Run Deep Agent");
+
+    expect(metadata.inputs.triage_label_needs_maintainer.default).toBe("triage: needs maintainer");
+    expect(metadata.inputs.triage_max_failed_attempts.default).toBe("3");
+    expect(run?.env?.INPUT_TRIAGE_RUN_LABEL).toBe("${{ inputs.triage_run_label }}");
+    expect(run?.env?.INPUT_TRIAGE_BOT_LOGINS).toBe("${{ inputs.triage_bot_logins }}");
+  });
 });
 
 describe("repository CI metadata", () => {

@@ -83,7 +83,7 @@ A concise map of every source file in the repository, organized by directory. Us
 | File          | Purpose                                                                                                                |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `detector.ts` | `detectMode` — routes event to `agent`/`review`/`noop`. `isReviewRequest`, `isReviewAndFixRequest`, `isResumeRequest`. |
-| `triage.ts`   | `runTriageCheck` — one-shot LLM classification of new issues. `classifyIssue`, `TriageHandoff`, `filterAllowedLabels`. |
+| `triage.ts`   | Label-backed lifecycle router, safe classification, maintainer-gated agent handoff, and triage outcome transitions. |
 
 ## `test/` — Unit tests
 

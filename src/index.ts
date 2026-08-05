@@ -13,7 +13,7 @@ import {
   isReviewAndFixRequest,
   isResumeRequest,
 } from "./modes/detector.js";
-import { runTriageCheck, type TriageHandoff } from "./modes/triage.js";
+import { finalizeTriageRun, runTriageCheck, type TriageHandoff } from "./modes/triage.js";
 import { resolveToken } from "./github/auth.js";
 import { makeOctokit, githubServerUrl, type Octokit } from "./github/client.js";
 import { forkRunAllowed } from "./github/fork.js";
@@ -213,8 +213,7 @@ async function run(): Promise<void> {
   if (
     modeDetected === "noop" &&
     config.enableTriage &&
-    ctx.eventName === "issues" &&
-    ctx.eventAction === "opened"
+    (ctx.eventName === "issues" || (ctx.eventName === "issue_comment" && !ctx.isPR))
   ) {
     triageHandoff = await runTriageCheck({ ctx, config });
   }
@@ -256,10 +255,7 @@ async function run(): Promise<void> {
   // decided this issue is actually a PR asking for one). "review and fix"
   // "review and fix" additionally applies the review's own single-line
   // suggestions and lands them as a commit.
-  const mode: Mode =
-    triageHandoff?.mode === "review" || (ctx.isPR && isReviewRequest(instruction))
-      ? "review"
-      : "agent";
+  const mode: Mode = ctx.isPR && isReviewRequest(instruction) ? "review" : "agent";
   record.mode = mode;
   const applyFixes = mode === "review" && isReviewAndFixRequest(instruction);
 
@@ -396,12 +392,25 @@ async function run(): Promise<void> {
         threadContext,
       });
     }
+    if (triageHandoff) {
+      await finalizeTriageRun({
+        octokit,
+        ctx,
+        config,
+        filesChanged: record.filesChanged,
+      });
+    }
     await emitOutputs(record);
   } catch (err) {
     // P0-11: clean failure with an actionable comment.
     const message = err instanceof Error ? err.message : String(err);
     record.status = "failed";
     record.error = message;
+    if (triageHandoff) {
+      await finalizeTriageRun({ octokit, ctx, config, filesChanged: [], failed: true }).catch(
+        () => {},
+      );
+    }
     if (commentId != null) {
       await updateTrackingComment(
         octokit,

@@ -7,6 +7,7 @@ import {
   parsePositiveNumber,
   parsePositiveInteger,
 } from "../src/config.js";
+import { DEFAULT_TRIAGE_LABELS } from "../src/modes/triage.js";
 
 describe("normalizeModel", () => {
   test("prefixes a bare claude model with anthropic", () => {
@@ -156,6 +157,28 @@ describe("loadConfig repeated tool-call limit", () => {
     process.env.INPUT_MAX_REPEATED_TOOL_CALLS = "0";
     expect(() => loadConfig()).toThrow("max_repeated_tool_calls");
     delete process.env.INPUT_MAX_REPEATED_TOOL_CALLS;
+  });
+});
+
+describe("loadConfig triage lifecycle", () => {
+  test("uses the visible lifecycle defaults and validates its bounded retry limit", () => {
+    delete process.env.INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION;
+    delete process.env.INPUT_TRIAGE_MAX_FAILED_ATTEMPTS;
+    expect(loadConfig().triageLabels.needsReproduction).toBe(
+      DEFAULT_TRIAGE_LABELS.needsReproduction,
+    );
+    expect(loadConfig().triageMaxFailedAttempts).toBe(3);
+
+    process.env.INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION = "state: more info";
+    process.env.INPUT_TRIAGE_MAX_FAILED_ATTEMPTS = "4";
+    try {
+      const config = loadConfig();
+      expect(config.triageLabels.needsReproduction).toBe("state: more info");
+      expect(config.triageMaxFailedAttempts).toBe(4);
+    } finally {
+      delete process.env.INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION;
+      delete process.env.INPUT_TRIAGE_MAX_FAILED_ATTEMPTS;
+    }
   });
 });
 

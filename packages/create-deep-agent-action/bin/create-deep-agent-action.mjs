@@ -6,7 +6,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { spawnSync } from "node:child_process";
 
-const ACTION_REF = "0e5409467f50a5b8cddf3109478a3ee477335757";
+const ACTION_REF = "fd11b3d56e6912b8b471d3f3fb2217c3575a56fe";
 const DEFAULTS = {
   directory: process.cwd(),
   model: "claude-sonnet-5",
@@ -97,7 +97,7 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    types: [opened, reopened, assigned, labeled]
   workflow_dispatch:
     inputs:
       prompt:

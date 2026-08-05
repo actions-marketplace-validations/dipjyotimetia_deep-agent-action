@@ -49,9 +49,12 @@ Defined in [`action.yml`](../../action.yml), parsed by `src/config.ts:loadConfig
 
 | Input                   | Default | Description                                                          |
 | ----------------------- | ------- | -------------------------------------------------------------------- |
-| `enable_triage`         | `false` | Classify new issues with no trigger phrase via a one-shot LLM call.  |
-| `triage_allowed_labels` | —       | Labels the triage classifier may apply; anything outside is ignored. |
-| `triage_model`          | —       | Model for triage classification; defaults to `model`.                |
+| `enable_triage`               | `false`     | Enable the label-backed lifecycle for issues without a trigger phrase. |
+| `triage_label_*`              | `triage: …` | Lifecycle labels; create them in the target repository before enabling triage. |
+| `triage_run_label`            | `triage: run` | Label a permitted maintainer applies to start an agentic run. |
+| `triage_bot_logins`           | —           | Extra bot accounts whose comments are ignored. |
+| `triage_max_failed_attempts`  | `3`         | Cap on automatic retries after failed triage. |
+| `triage_model`                | —           | Model for lifecycle classification; defaults to `model`. |
 
 ### Shell Guardrails
 

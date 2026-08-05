@@ -15,7 +15,7 @@ The action's core is a single linear orchestration function (`run()` in `src/ind
 
 2. **Config merge** — action inputs are loaded via `config.ts:loadConfig`, then an optional per-repo `.github/deep-agent.yml` is loaded via `config/repoConfig.ts` and overlaid with `mergeRepoConfig`. The built-in deny-list is always re-merged so repo config can never weaken it.
 
-3. **Route** — `modes/detector.ts:detectMode` decides `agent`, `review`, or `noop`. No trigger phrase and no explicit prompt → `noop` → exit with no side effects. When triage is enabled and the event is a new issue with no trigger, a one-shot LLM call classifies it before giving up.
+3. **Route** — `modes/detector.ts:detectMode` decides `agent`, `review`, or `noop`. With opt-in triage, `modes/triage.ts` additionally routes issue open/reopen, evidence comments, and the maintainer-run label through a visible lifecycle.
 
 4. **Token** — `github/auth.ts:resolveToken` mints a scoped, short-lived GitHub App installation token (when `app_id` + `app_private_key` are configured), falling back to `GITHUB_TOKEN`. The token source (`"app"` | `"github_token"`) determines commit identity and whether verified commits are available.
 
@@ -74,7 +74,7 @@ These are the easy things to break. They are enforced by code and tested, but ch
 
 ## Triage Mode (Opt-In)
 
-When `enable_triage: true` is configured, a new issue with no trigger phrase is classified by a one-shot LLM structured-output call (`modes/triage.ts`). The classifier decides: open a PR, request a review, ask for clarification, add labels, or do nothing. Triage never lowers the authorization bar — the issue author must pass the same human + write/admin checks. Triage-originated runs always land behind the approval gate. Explicit triggers always win over triage.
+When `enable_triage: true` is configured, labels represent a durable issue lifecycle. Any human reporter can receive safe classification, labels, and a reproduction request. Only a write/admin actor may start the coding harness: directly for their own actionable report, or by applying `triage: run` to an external report. Re-triage reacts only to new human comments on non-terminal states; bot comments are ignored, failures are bounded, and fixes always use the approval gate.
 
 ## Relationship to Other Pages
 
