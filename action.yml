@@ -108,18 +108,64 @@ inputs:
     default: "false"
   enable_triage:
     description: >-
-      Classify a new issue with no trigger phrase via a cheap one-shot model call, deciding
-      whether to open a PR, request a review, ask for clarification, add labels, or do nothing.
-      Default off. Only ever acts when the issue's author passes the same human/permission checks
-      as a manual mention, and any resulting PR is forced through the approval gate.
+      Enable the label-backed issue-triage lifecycle. External contributors receive only safe
+      classification/labels/comments; an agentic fix needs a permitted author or triage_run_label.
+      Default off. Any resulting code change is always forced through the approval gate.
     required: false
     default: "false"
   triage_allowed_labels:
-    description: "Comma/newline-separated labels the triage classifier may apply. Anything outside this list is ignored."
+    description: "Deprecated; retained for compatibility and ignored by the lifecycle. Configure named triage_label_* inputs instead."
     required: false
   triage_model:
-    description: "Model used for the triage classification call. Defaults to the 'model' input."
+    description: "Model used for triage classification and final outcome assessment. Defaults to the 'model' input."
     required: false
+  triage_label_needs_triage:
+    description: "Lifecycle label for an issue currently being assessed."
+    required: false
+    default: "triage: needs triage"
+  triage_label_needs_reproduction:
+    description: "Lifecycle label for an issue missing a reproducible report."
+    required: false
+    default: "triage: needs reproduction"
+  triage_label_unable_to_reproduce:
+    description: "Lifecycle label for an issue the agent could not reproduce."
+    required: false
+    default: "triage: unable to reproduce"
+  triage_label_unable_to_fix:
+    description: "Lifecycle label for a reproduced issue with no safe fix."
+    required: false
+    default: "triage: unable to fix"
+  triage_label_needs_maintainer:
+    description: "Lifecycle label for an actionable external issue awaiting maintainer approval."
+    required: false
+    default: "triage: needs maintainer"
+  triage_label_fix_proposed:
+    description: "Lifecycle label for an issue with a draft fix proposal."
+    required: false
+    default: "triage: fix proposed"
+  triage_label_not_actionable:
+    description: "Lifecycle label for non-actionable issues."
+    required: false
+    default: "triage: not actionable"
+  triage_label_skipped:
+    description: "Lifecycle label for issues unsuitable for runner triage."
+    required: false
+    default: "triage: skipped"
+  triage_label_failed:
+    description: "Lifecycle label for unexpected triage failures."
+    required: false
+    default: "triage: failed"
+  triage_run_label:
+    description: "Label a permitted maintainer applies to start an agentic triage run."
+    required: false
+    default: "triage: run"
+  triage_bot_logins:
+    description: "Comma/newline-separated additional bot logins whose comments never trigger re-triage."
+    required: false
+  triage_max_failed_attempts:
+    description: "Maximum automatic triage failures before manual intervention is required."
+    required: false
+    default: "3"
   max_cost_usd:
     description: "Abort the run once estimated spend reaches this many USD (requires a known model price; pair with max_total_tokens for unpriced models). Partial work lands as a draft for review. Unset = no cap."
     required: false
@@ -221,6 +267,18 @@ runs:
         INPUT_ENABLE_TRIAGE: ${{ inputs.enable_triage }}
         INPUT_TRIAGE_ALLOWED_LABELS: ${{ inputs.triage_allowed_labels }}
         INPUT_TRIAGE_MODEL: ${{ inputs.triage_model }}
+        INPUT_TRIAGE_LABEL_NEEDS_TRIAGE: ${{ inputs.triage_label_needs_triage }}
+        INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION: ${{ inputs.triage_label_needs_reproduction }}
+        INPUT_TRIAGE_LABEL_UNABLE_TO_REPRODUCE: ${{ inputs.triage_label_unable_to_reproduce }}
+        INPUT_TRIAGE_LABEL_UNABLE_TO_FIX: ${{ inputs.triage_label_unable_to_fix }}
+        INPUT_TRIAGE_LABEL_NEEDS_MAINTAINER: ${{ inputs.triage_label_needs_maintainer }}
+        INPUT_TRIAGE_LABEL_FIX_PROPOSED: ${{ inputs.triage_label_fix_proposed }}
+        INPUT_TRIAGE_LABEL_NOT_ACTIONABLE: ${{ inputs.triage_label_not_actionable }}
+        INPUT_TRIAGE_LABEL_SKIPPED: ${{ inputs.triage_label_skipped }}
+        INPUT_TRIAGE_LABEL_FAILED: ${{ inputs.triage_label_failed }}
+        INPUT_TRIAGE_RUN_LABEL: ${{ inputs.triage_run_label }}
+        INPUT_TRIAGE_BOT_LOGINS: ${{ inputs.triage_bot_logins }}
+        INPUT_TRIAGE_MAX_FAILED_ATTEMPTS: ${{ inputs.triage_max_failed_attempts }}
         INPUT_MAX_COST_USD: ${{ inputs.max_cost_usd }}
         INPUT_MAX_TOTAL_TOKENS: ${{ inputs.max_total_tokens }}
         INPUT_MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes }}

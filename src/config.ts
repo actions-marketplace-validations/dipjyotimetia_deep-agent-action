@@ -3,6 +3,7 @@ import type { Config } from "./types.js";
 import { parseFilesystemPermissions, parseHarnessProfile } from "./agent/policy.js";
 import { parseSubagents } from "./agent/subagents.js";
 import { DEFAULT_PROTECTED_PATHS, parseProtectedPaths } from "./github/protectedPaths.js";
+import { DEFAULT_TRIAGE_LABELS, type TriageLabels } from "./modes/triage.js";
 
 /** Default shell commands the agent is allowed to run. */
 export const DEFAULT_ALLOWED_COMMANDS = [
@@ -135,6 +136,38 @@ function inputOrEnv(name: string, envNames: string[]): string {
   return "";
 }
 
+/** Read a triage label input without ever allowing an empty state label. */
+function triageLabelInput(name: string, fallback: string): string {
+  return core.getInput(name).trim() || fallback;
+}
+
+function loadTriageLabels(): TriageLabels {
+  return {
+    needsTriage: triageLabelInput("triage_label_needs_triage", DEFAULT_TRIAGE_LABELS.needsTriage),
+    needsReproduction: triageLabelInput(
+      "triage_label_needs_reproduction",
+      DEFAULT_TRIAGE_LABELS.needsReproduction,
+    ),
+    unableToReproduce: triageLabelInput(
+      "triage_label_unable_to_reproduce",
+      DEFAULT_TRIAGE_LABELS.unableToReproduce,
+    ),
+    unableToFix: triageLabelInput("triage_label_unable_to_fix", DEFAULT_TRIAGE_LABELS.unableToFix),
+    needsMaintainer: triageLabelInput(
+      "triage_label_needs_maintainer",
+      DEFAULT_TRIAGE_LABELS.needsMaintainer,
+    ),
+    fixProposed: triageLabelInput("triage_label_fix_proposed", DEFAULT_TRIAGE_LABELS.fixProposed),
+    notActionable: triageLabelInput(
+      "triage_label_not_actionable",
+      DEFAULT_TRIAGE_LABELS.notActionable,
+    ),
+    skipped: triageLabelInput("triage_label_skipped", DEFAULT_TRIAGE_LABELS.skipped),
+    failed: triageLabelInput("triage_label_failed", DEFAULT_TRIAGE_LABELS.failed),
+    run: triageLabelInput("triage_run_label", DEFAULT_TRIAGE_LABELS.run),
+  };
+}
+
 /** Load and normalize action inputs from the environment. */
 export function loadConfig(): Config {
   const allowedCommands = parseList(core.getInput("allowed_commands"));
@@ -157,6 +190,10 @@ export function loadConfig(): Config {
     enableTriage: parseBool(core.getInput("enable_triage")),
     triageAllowedLabels: parseList(core.getInput("triage_allowed_labels")),
     triageModel: core.getInput("triage_model") || undefined,
+    triageLabels: loadTriageLabels(),
+    triageBotLogins: parseList(core.getInput("triage_bot_logins")),
+    triageMaxFailedAttempts:
+      parsePositiveInteger(core.getInput("triage_max_failed_attempts"), "triage_max_failed_attempts") ?? 3,
     mcpConfig: core.getInput("mcp_config") || "",
     harnessProfile: parseHarnessProfile(core.getInput("harness_profile")),
     filesystemPermissions: parseFilesystemPermissions(core.getInput("filesystem_permissions")),

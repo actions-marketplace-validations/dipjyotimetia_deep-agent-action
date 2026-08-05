@@ -85,6 +85,12 @@ export interface Config {
   triageAllowedLabels: string[];
   /** Model used for the triage classification call; defaults to `model`. */
   triageModel?: string;
+  /** Named, visible GitHub labels that encode the opt-in triage lifecycle. */
+  triageLabels: import("./modes/triage.js").TriageLabels;
+  /** Extra bot logins whose comments must never wake a waiting triage state. */
+  triageBotLogins: string[];
+  /** Automatic triage failures permitted before retries require manual intervention. */
+  triageMaxFailedAttempts: number;
   /** Raw MCP server config JSON (optional); empty string when unset. */
   mcpConfig: string;
   /** Optional validated deepagents harness profile. */
