@@ -49,11 +49,12 @@ describe("create-deep-agent-action", () => {
     expect(result.exitCode).toBe(0);
     const workflow = readFileSync(join(root, ".github/workflows/deep-agent.yml"), "utf8");
     expect(workflow).toContain(
-      "uses: dipjyotimetia/deep-agent-action@0e5409467f50a5b8cddf3109478a3ee477335757",
+      "uses: dipjyotimetia/deep-agent-action@fd11b3d56e6912b8b471d3f3fb2217c3575a56fe",
     );
     expect(workflow).toContain('model: "claude-sonnet-5"');
     expect(workflow).toContain("require_push_approval: true");
     expect(workflow).toContain("PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}");
+    expect(workflow).toContain("types: [opened, reopened, assigned, labeled]");
     expect(readFileSync(join(root, ".deepagents/AGENTS.md"), "utf8")).toContain(
       "Do not store credentials",
     );
