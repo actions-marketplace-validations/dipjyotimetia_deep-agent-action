@@ -39,9 +39,10 @@
   "overrides": {
     "@modelcontextprotocol/sdk": "1.30.0",
     "@hono/node-server": "2.0.12",
-    "hono": "4.12.32",
+    "hono": "4.12.34",
     "body-parser": "2.3.0",
-    "fast-uri": "3.1.4",
+    "fast-uri": "3.1.5",
+    "ip-address": "10.3.1",
     "undici": "6.28.0"
   }
 }
