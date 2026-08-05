@@ -10,6 +10,128 @@ import { findTrackingComment } from "../github/comments.js";
 import { normalizeModel, resolveProviderApiKey } from "../config.js";
 import { createModel } from "../agent/model.js";
 
+/** Lifecycle states use labels as durable, visible GitHub state. */
+export const TRIAGE_STATES = [
+  "needs_triage",
+  "needs_reproduction",
+  "unable_to_reproduce",
+  "unable_to_fix",
+  "needs_maintainer",
+  "fix_proposed",
+  "not_actionable",
+  "skipped",
+  "failed",
+] as const;
+export type TriageState = (typeof TRIAGE_STATES)[number];
+
+export interface TriageLabels {
+  needsTriage: string;
+  needsReproduction: string;
+  unableToReproduce: string;
+  unableToFix: string;
+  needsMaintainer: string;
+  fixProposed: string;
+  notActionable: string;
+  skipped: string;
+  failed: string;
+  /** A maintainer-applied trigger, not an authoritative lifecycle state. */
+  run: string;
+}
+
+export const DEFAULT_TRIAGE_LABELS: TriageLabels = {
+  needsTriage: "triage: needs triage",
+  needsReproduction: "triage: needs reproduction",
+  unableToReproduce: "triage: unable to reproduce",
+  unableToFix: "triage: unable to fix",
+  needsMaintainer: "triage: needs maintainer",
+  fixProposed: "triage: fix proposed",
+  notActionable: "triage: not actionable",
+  skipped: "triage: skipped",
+  failed: "triage: failed",
+  run: "triage: run",
+};
+
+const STATE_LABEL_KEYS: Record<TriageState, keyof TriageLabels> = {
+  needs_triage: "needsTriage",
+  needs_reproduction: "needsReproduction",
+  unable_to_reproduce: "unableToReproduce",
+  unable_to_fix: "unableToFix",
+  needs_maintainer: "needsMaintainer",
+  fix_proposed: "fixProposed",
+  not_actionable: "notActionable",
+  skipped: "skipped",
+  failed: "failed",
+};
+
+const RETRIAGEABLE_STATES = new Set<TriageState>([
+  "needs_reproduction",
+  "unable_to_reproduce",
+  "unable_to_fix",
+  "needs_maintainer",
+  "failed",
+]);
+
+/** Return the one configured lifecycle state currently attached to an issue. */
+export function currentTriageState(
+  labels: string[],
+  triageLabels: TriageLabels = DEFAULT_TRIAGE_LABELS,
+): TriageState | null {
+  for (const state of TRIAGE_STATES) {
+    if (labels.includes(triageLabels[STATE_LABEL_KEYS[state]])) return state;
+  }
+  return null;
+}
+
+/** Calculate the minimum GitHub label mutation needed for a state transition. */
+export function stateLabelSwap(
+  labels: string[],
+  current: TriageState | null,
+  next: TriageState,
+  triageLabels: TriageLabels = DEFAULT_TRIAGE_LABELS,
+): { remove?: string; add: string } {
+  const remove = current ? triageLabels[STATE_LABEL_KEYS[current]] : undefined;
+  const add = triageLabels[STATE_LABEL_KEYS[next]];
+  return labels.includes(add) ? { remove, add } : { remove, add };
+}
+
+export type TriageRoute =
+  | { type: "classify" }
+  | { type: "retriage"; state: TriageState }
+  | { type: "run"; state: TriageState | null }
+  | { type: "skip"; reason: "bot" | "pull_request" | "terminal_state" | "unmatched_event" };
+
+/** Pure event router; all model calls and GitHub writes live outside this boundary. */
+export function routeTriage(
+  event: {
+    eventName: string;
+    eventAction?: string;
+    eventLabel?: string;
+    isPR: boolean;
+    labels: string[];
+    actor: string;
+  },
+  opts: { labels?: TriageLabels; botLogins?: string[] } = {},
+): TriageRoute {
+  const labels = opts.labels ?? DEFAULT_TRIAGE_LABELS;
+  const botLogins = new Set(["github-actions[bot]", ...(opts.botLogins ?? [])].map((login) => login.toLowerCase()));
+  if (event.isPR) return { type: "skip", reason: "pull_request" };
+  if (botLogins.has(event.actor.toLowerCase())) return { type: "skip", reason: "bot" };
+
+  const state = currentTriageState(event.labels, labels);
+  if (event.eventName === "issues" && (event.eventAction === "opened" || event.eventAction === "reopened")) {
+    return { type: "classify" };
+  }
+  if (event.eventName === "issues" && event.eventAction === "labeled" && event.eventLabel === labels.run) {
+    return { type: "run", state };
+  }
+  if (event.eventName === "issue_comment" && event.eventAction === "created") {
+    return state && RETRIAGEABLE_STATES.has(state)
+      ? { type: "retriage", state }
+      : { type: "skip", reason: state ? "terminal_state" : "unmatched_event" };
+  }
+  return { type: "skip", reason: "unmatched_event" };
+}
+
 export const TRIAGE_ACTIONS = ["open_pr", "review", "clarify", "label", "none"] as const;
 export type TriageAction = (typeof TRIAGE_ACTIONS)[number];
 
