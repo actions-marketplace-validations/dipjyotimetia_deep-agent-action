@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadConfig, mergeRepoConfig, normalizeModel, resolveProviderApiKey } from "./config.js";
+import { loadConfig, normalizeModel, resolveProviderApiKey } from "./config.js";
 import { loadRepoConfig, type RepoConfig } from "./config/repoConfig.js";
 import { parseContext } from "./github/context.js";
 import {
@@ -13,7 +13,7 @@ import {
   isReviewAndFixRequest,
   isResumeRequest,
 } from "./modes/detector.js";
-import { runTriageCheck, type TriageHandoff } from "./modes/triage.js";
+import { finalizeTriageRun, runTriageCheck, type TriageHandoff } from "./modes/triage.js";
 import { resolveToken } from "./github/auth.js";
 import { makeOctokit, githubServerUrl, type Octokit } from "./github/client.js";
 import { forkRunAllowed } from "./github/fork.js";
@@ -54,8 +54,11 @@ import {
   getCurrentBranch,
   landChanges,
   resolveBotIdentity,
+  listChangedFiles,
+  stripCheckoutCredentials,
   type LandResult,
 } from "./github/ops.js";
+import { assertPublishableChanges } from "./github/protectedPaths.js";
 import { landChangesVerified } from "./github/graphqlCommit.js";
 import {
   applyReviewSuggestions,
@@ -142,7 +145,7 @@ function maxRuntimeMsFrom(config: Config): number | undefined {
 async function smokeCheck(): Promise<void> {
   const anthropic = createModel({
     provider: "anthropic",
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     apiKey: "smoke",
   });
   const openai = createModel({ provider: "openai", model: "gpt-5", apiKey: "smoke" });
@@ -181,9 +184,9 @@ async function run(): Promise<void> {
   });
   const rootDir = process.env.GITHUB_WORKSPACE || process.cwd();
 
-  // Merge per-repo config (committed `.github/deep-agent.yml`) over action inputs.
+  // Load optional repository guidance; execution policy stays workflow-owned.
   const repoConfig = loadRepoConfig(rootDir);
-  let config = mergeRepoConfig(loadConfig(), repoConfig);
+  let config = loadConfig();
 
   const record: RunRecord = {
     status: "skipped",
@@ -210,8 +213,7 @@ async function run(): Promise<void> {
   if (
     modeDetected === "noop" &&
     config.enableTriage &&
-    ctx.eventName === "issues" &&
-    ctx.eventAction === "opened"
+    (ctx.eventName === "issues" || (ctx.eventName === "issue_comment" && !ctx.isPR))
   ) {
     triageHandoff = await runTriageCheck({ ctx, config });
   }
@@ -251,15 +253,11 @@ async function run(): Promise<void> {
 
   // Refine to review mode when a PR mention asks for a review (or triage
   // decided this issue is actually a PR asking for one). "review and fix"
-  // (or the apply_suggestions config) additionally applies the review's own
-  // single-line suggestions and lands them as a commit.
-  const mode: Mode =
-    triageHandoff?.mode === "review" || (ctx.isPR && isReviewRequest(instruction))
-      ? "review"
-      : "agent";
+  // "review and fix" additionally applies the review's own single-line
+  // suggestions and lands them as a commit.
+  const mode: Mode = ctx.isPR && isReviewRequest(instruction) ? "review" : "agent";
   record.mode = mode;
-  const applyFixes =
-    mode === "review" && (isReviewAndFixRequest(instruction) || config.applySuggestions);
+  const applyFixes = mode === "review" && isReviewAndFixRequest(instruction);
 
   // P0-12: mint a scoped, short-lived token — reuse triage's if it already
   // minted one (it already ran the same auth checks below for this actor).
@@ -342,8 +340,11 @@ async function run(): Promise<void> {
 
   try {
     const apiKey = resolveProviderApiKey();
-    const { provider, name } = normalizeModel(config.model);
-    const model = createModel({ provider, model: name, apiKey, baseUrl: config.baseUrl });
+    const modelFor = (modelSpec: string) => {
+      const { provider, name } = normalizeModel(modelSpec);
+      return createModel({ provider, model: name, apiKey, baseUrl: config.baseUrl });
+    };
+    const model = modelFor(config.model);
 
     if (mode === "review") {
       await runReview({
@@ -355,6 +356,7 @@ async function run(): Promise<void> {
         appSlug: tokenResult.appSlug,
         applyFixes,
         model,
+        modelFor,
         instruction,
         repoConfig,
         config,
@@ -376,6 +378,7 @@ async function run(): Promise<void> {
         tokenSource: tokenResult.source,
         appSlug: tokenResult.appSlug,
         model,
+        modelFor,
         instruction,
         repoConfig,
         config,
@@ -389,12 +392,25 @@ async function run(): Promise<void> {
         threadContext,
       });
     }
+    if (triageHandoff) {
+      await finalizeTriageRun({
+        octokit,
+        ctx,
+        config,
+        filesChanged: record.filesChanged,
+      });
+    }
     await emitOutputs(record);
   } catch (err) {
     // P0-11: clean failure with an actionable comment.
     const message = err instanceof Error ? err.message : String(err);
     record.status = "failed";
     record.error = message;
+    if (triageHandoff) {
+      await finalizeTriageRun({ octokit, ctx, config, filesChanged: [], failed: true }).catch(
+        () => {},
+      );
+    }
     if (commentId != null) {
       await updateTrackingComment(
         octokit,
@@ -426,6 +442,8 @@ interface FlowParams {
   token: string;
   tokenSource: "app" | "github_token";
   model: Parameters<typeof buildAgent>[0]["model"];
+  /** Static-provider model factory for configured specialist overrides. */
+  modelFor: (modelSpec: string) => Parameters<typeof buildAgent>[0]["model"];
   instruction: string;
   repoConfig: RepoConfig;
   config: Config;
@@ -506,6 +524,7 @@ async function landChangesForRun(
     baseBranch?: string;
   },
 ): Promise<LandResult> {
+  assertPublishableChanges(listChangedFiles(p.rootDir), p.config.protectedPaths);
   if (p.config.verifiedCommits) {
     return landChangesVerified({ octokit: p.octokit, ctx: p.ctx, rootDir: p.rootDir, ...args });
   }
@@ -540,6 +559,7 @@ async function runImplement(p: FlowParams): Promise<void> {
   // Fail fast (before spending an agent run) rather than silently falling
   // back to unsigned commits when verified_commits is requested without App auth.
   assertVerifiedCommitsAuth(config, p.tokenSource);
+  stripCheckoutCredentials(rootDir, `${githubServerUrl()}/${ctx.owner}/${ctx.repo}.git`);
 
   // PR mode: switch to the PR head so the agent edits the right branch.
   if (isPRMode && ctx.prHeadRef) {
@@ -568,12 +588,13 @@ async function runImplement(p: FlowParams): Promise<void> {
     systemPrompt: systemPromptFor(buildSystemPrompt(ctx, { isPRMode }), repoConfig),
     harnessProfile: config.harnessProfile,
     filesystemPermissions: config.filesystemPermissions,
-    interruptOn: config.interruptOn,
     allowedCommands: config.allowedCommands,
     deniedCommands: config.deniedCommands,
     shellTimeoutSeconds: config.shellTimeoutSeconds,
     toolCallRecord: record.toolCalls,
     extraTools: p.mcpTools,
+    subagents: config.subagents,
+    subagentModelFor: p.modelFor,
   });
 
   // "continue"/"resume" seeds the prior turn's incomplete todo list directly
@@ -607,13 +628,14 @@ async function runImplement(p: FlowParams): Promise<void> {
       budget: budgetFrom(config),
       maxRuntimeMs: maxRuntimeMsFrom(config),
       recursionLimit: config.recursionLimit,
+      maxRepeatedToolCalls: config.maxRepeatedToolCalls,
     },
   );
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
   record.summary = result.summary;
   record.stopReason = result.stopped;
-  record.pendingInterrupts = result.pendingInterrupts;
+  record.stopDetail = result.stopDetail;
   record.activities = result.activities;
 
   // P0-7 + M4: commit + open PR / push, gated by approval when configured. A
@@ -632,7 +654,7 @@ async function runImplement(p: FlowParams): Promise<void> {
   record.branch = land.branch;
   record.prUrl = land.prUrl;
   record.approvalPending = land.approvalPending;
-  record.status = result.stopped === "interrupt" ? "interrupted" : "success";
+  record.status = "success";
 
   if (commentId != null) {
     await updateTrackingComment(
@@ -648,7 +670,7 @@ async function runImplement(p: FlowParams): Promise<void> {
         branch: record.branch,
         approvalPending: record.approvalPending,
         stopReason: record.stopReason,
-        interrupts: record.pendingInterrupts,
+        stopDetail: record.stopDetail,
         activity: record.activities?.at(-1),
         tokens: record.tokens,
         costUsd: record.costUsd,
@@ -666,8 +688,7 @@ async function runImplement(p: FlowParams): Promise<void> {
 
 /**
  * Review flow (M3): review the PR diff and post inline comments; no edits.
- * When `applyFixes` is set (a "review and fix" mention, or `apply_suggestions`
- * configured repo-wide), findings with a clean single-line `suggestion` are
+ * When `applyFixes` is set by a "review and fix" mention, findings with a clean single-line `suggestion` are
  * also applied directly to the files and landed as a commit before the
  * review is posted — findings without one still surface as comments.
  */
@@ -698,7 +719,6 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
       systemPrompt: systemPromptFor(buildReviewSystemPrompt(ctx), repoConfig),
       harnessProfile: config.harnessProfile,
       filesystemPermissions: config.filesystemPermissions,
-      interruptOn: config.interruptOn,
       allowedCommands: config.allowedCommands,
       deniedCommands: config.deniedCommands,
       shellTimeoutSeconds: config.shellTimeoutSeconds,
@@ -728,6 +748,7 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
         budget: budgetFrom(config),
         maxRuntimeMs: maxRuntimeMsFrom(config),
         recursionLimit: config.recursionLimit,
+        maxRepeatedToolCalls: config.maxRepeatedToolCalls,
       },
     );
   } catch (err) {
@@ -737,39 +758,8 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
   applyUsage(record, config.model, result.tokens);
   record.plan = result.todos;
   record.stopReason = result.stopped;
-  record.pendingInterrupts = result.pendingInterrupts;
+  record.stopDetail = result.stopDetail;
   record.activities = result.activities;
-
-  if (result.stopped === "interrupt") {
-    rmSync(reviewOutputDir, { recursive: true, force: true });
-    record.summary = result.summary || "The review paused before an external tool was run.";
-    record.status = "interrupted";
-    if (commentId != null) {
-      await updateTrackingComment(
-        octokit,
-        ctx,
-        commentId,
-        p.renderBody({
-          status: "interrupted",
-          instruction,
-          todos: record.plan,
-          summary: record.summary,
-          interrupts: record.pendingInterrupts,
-          activity: record.activities?.at(-1),
-          stopReason: record.stopReason,
-          tokens: record.tokens,
-          costUsd: record.costUsd,
-          runUrl: url,
-          memory: appendTurn(p.priorMemory, {
-            instruction,
-            summary: record.summary,
-            openTodos: record.plan,
-          }),
-        }),
-      );
-    }
-    return;
-  }
 
   // Read the findings the agent wrote (file-handoff).
   const review = readFindings(reviewOutputDir, result.summary);
@@ -823,7 +813,7 @@ async function runReview(p: FlowParams & { applyFixes: boolean }): Promise<void>
         branch: record.branch,
         approvalPending: record.approvalPending,
         stopReason: record.stopReason,
-        interrupts: record.pendingInterrupts,
+        stopDetail: record.stopDetail,
         activity: record.activities?.at(-1),
         tokens: record.tokens,
         costUsd: record.costUsd,

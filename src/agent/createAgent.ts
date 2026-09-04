@@ -10,17 +10,15 @@ import {
 } from "deepagents";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { DynamicStructuredTool } from "@langchain/core/tools";
-import { MemorySaver } from "@langchain/langgraph";
 import type { ToolCallRecord } from "../types.js";
 import { GuardedLocalShellBackend } from "./shellGuard.js";
 import { buildShellEnv } from "./env.js";
 import {
   buildFilesystemPermissions,
-  buildInterruptPolicy,
   buildReviewFilesystemPermissions,
   discoverDeepAgentSources,
 } from "./policy.js";
-import type { InterruptPolicy } from "./policy.js";
+import { resolveSubagents, type DeepAgentSubagentConfig } from "./subagents.js";
 
 interface BuildAgentCommonOptions {
   model: BaseChatModel;
@@ -35,8 +33,10 @@ interface BuildAgentCommonOptions {
   harnessProfile?: HarnessProfile;
   /** Optional filesystem permission rules layered below the memory write-protection floor. */
   filesystemPermissions?: FilesystemPermission[];
-  /** Optional tool interrupt rules; MCP tools are interrupted by default. */
-  interruptOn?: InterruptPolicy;
+  /** Optional synchronous specialist subagents; ignored in read-only review mode. */
+  subagents?: DeepAgentSubagentConfig[];
+  /** Builds a statically imported provider model for an opted-in specialist override. */
+  subagentModelFor?: (model: string) => BaseChatModel;
   /** Mutable sink the shell guard appends tool-call records to. */
   toolCallRecord: ToolCallRecord[];
 }
@@ -56,9 +56,7 @@ export type BuildAgentOptions = BuildAgentCommonOptions &
 
 export interface ResolveAgentPolicyOptions {
   rootDir: string;
-  mcpToolNames: string[];
   filesystemPermissions?: FilesystemPermission[];
-  interruptOn?: InterruptPolicy;
 }
 
 /**
@@ -79,15 +77,12 @@ export function resolveAgentPolicy(opts: ResolveAgentPolicyOptions): {
   memory?: string[];
   skills?: string[];
   permissions: FilesystemPermission[];
-  interruptOn?: InterruptPolicy;
 } {
   const sources = discoverDeepAgentSources(opts.rootDir);
-  const interruptOn = buildInterruptPolicy(opts.mcpToolNames, opts.interruptOn);
   return {
     memory: sources.memory,
     skills: sources.skills,
     permissions: buildFilesystemPermissions(opts.filesystemPermissions),
-    interruptOn: Object.keys(interruptOn).length ? interruptOn : undefined,
   };
 }
 
@@ -156,17 +151,24 @@ export function buildAgent(opts: BuildAgentOptions) {
 
   const policy = resolveAgentPolicy({
     rootDir: opts.rootDir,
-    mcpToolNames: (opts.mode === "implement" ? (opts.extraTools ?? []) : []).map(
-      (tool) => tool.name,
-    ),
     filesystemPermissions: opts.filesystemPermissions,
-    interruptOn: opts.interruptOn,
   });
 
   const permissions =
     opts.mode === "review"
       ? buildReviewFilesystemPermissions(opts.filesystemPermissions)
       : policy.permissions;
+  const extraTools = opts.mode === "implement" ? (opts.extraTools ?? []) : [];
+  const subagents =
+    opts.mode === "implement"
+      ? resolveSubagents(
+          opts.subagents,
+          extraTools,
+          policy.permissions,
+          policy.skills,
+          opts.subagentModelFor,
+        )
+      : [];
 
   // deepagents rejects filesystem permissions on a raw shell backend because
   // shell commands can bypass path rules. A root composite route makes the
@@ -188,7 +190,7 @@ export function buildAgent(opts: BuildAgentOptions) {
   return createDeepAgent({
     model: opts.model,
     backend,
-    systemPrompt: { prefix: opts.systemPrompt },
+    systemPrompt: opts.systemPrompt,
     middleware: [
       createFilesystemMiddleware({
         backend,
@@ -196,13 +198,9 @@ export function buildAgent(opts: BuildAgentOptions) {
         tools: filesystemTools,
       }),
     ],
-    tools: opts.mode === "implement" ? (opts.extraTools ?? []) : [],
+    tools: extraTools,
+    ...(subagents.length ? { subagents } : {}),
     memory: policy.memory,
     skills: policy.skills,
-    interruptOn: policy.interruptOn,
-    // LangGraph's interrupt primitive requires a checkpointer even when the
-    // workflow intentionally does not support cross-run resume. A fresh
-    // in-memory saver is scoped to this runner invocation.
-    checkpointer: policy.interruptOn ? new MemorySaver() : undefined,
   });
 }

@@ -30,7 +30,7 @@ jobs:
 
       - uses: dipjyotimetia/deep-agent-action@main
         with:
-          model: "claude-sonnet-4-6"
+          model: "claude-sonnet-5"
           trigger_phrase: "@agent"
         env:
           PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}

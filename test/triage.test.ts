@@ -1,65 +1,127 @@
 import { describe, expect, test } from "bun:test";
 import {
-  classifyIssue,
-  filterAllowedLabels,
+  currentTriageState,
+  DEFAULT_TRIAGE_LABELS,
+  routeTriage,
   resolveTriageInstruction,
-  type TriageDecision,
+  stateLabelSwap,
 } from "../src/modes/triage.js";
-import { makeContext } from "./mockContext.js";
 
-describe("filterAllowedLabels", () => {
-  test("keeps only labels within the configured allow-list", () => {
-    const decision: TriageDecision = {
-      action: "label",
-      labels: ["bug", "duplicate", "made-up"],
-      reason: "x",
-    };
-    expect(filterAllowedLabels(decision, ["bug", "duplicate"])).toEqual(["bug", "duplicate"]);
+describe("currentTriageState", () => {
+  test("recognizes the configured lifecycle label while preserving unrelated labels", () => {
+    expect(currentTriageState(["bug", DEFAULT_TRIAGE_LABELS.needsReproduction])).toBe(
+      "needs_reproduction",
+    );
   });
 
-  test("returns an empty array when the decision proposed no labels", () => {
-    const decision: TriageDecision = { action: "label", reason: "x" };
-    expect(filterAllowedLabels(decision, ["bug"])).toEqual([]);
-  });
-
-  test("returns an empty array when nothing is allowed", () => {
-    const decision: TriageDecision = { action: "label", labels: ["bug"], reason: "x" };
-    expect(filterAllowedLabels(decision, [])).toEqual([]);
+  test("returns null when no lifecycle label is present", () => {
+    expect(currentTriageState(["bug", "priority: high"])).toBeNull();
   });
 });
 
-describe("resolveTriageInstruction", () => {
-  test("uses the issue's title/body text when present", () => {
-    const ctx = makeContext({ triggerText: "Fix the login bug" });
-    expect(resolveTriageInstruction(ctx)).toBe("Fix the login bug");
+test("triage handoff requires reproduce, diagnose, verify, and validate before a fix", () => {
+  const instruction = resolveTriageInstruction({
+    eventName: "issues",
+    owner: "owner",
+    repo: "repo",
+    actor: "alice",
+    isPR: false,
+    isPullRequestReviewComment: false,
+    labels: [],
+    triggerText: "It crashes after login.",
+    payload: {},
+  });
+  expect(instruction).toContain("reproduce the report");
+  expect(instruction).toContain("It crashes after login.");
+});
+
+describe("stateLabelSwap", () => {
+  test("replaces only the current lifecycle label", () => {
+    expect(
+      stateLabelSwap(
+        ["bug", DEFAULT_TRIAGE_LABELS.needsReproduction, "priority: high"],
+        "needs_reproduction",
+        "needs_maintainer",
+      ),
+    ).toEqual({
+      remove: DEFAULT_TRIAGE_LABELS.needsReproduction,
+      add: DEFAULT_TRIAGE_LABELS.needsMaintainer,
+    });
   });
 
-  test("falls back to a default instruction when there's no usable text", () => {
-    const ctx = makeContext({ triggerText: undefined });
-    expect(resolveTriageInstruction(ctx)).toBe("Triage and address this issue as appropriate.");
-    const blank = makeContext({ triggerText: "   " });
-    expect(resolveTriageInstruction(blank)).toBe("Triage and address this issue as appropriate.");
+  test("adds the new lifecycle label when the issue has no previous state", () => {
+    expect(stateLabelSwap(["bug"], null, "not_actionable")).toEqual({
+      remove: undefined,
+      add: DEFAULT_TRIAGE_LABELS.notActionable,
+    });
   });
 });
 
-describe("classifyIssue", () => {
-  test("invokes the model's structured output and returns the decision", async () => {
-    let capturedMessages: unknown;
-    const fakeModel = {
-      withStructuredOutput: (_schema: unknown) => ({
-        invoke: async (messages: unknown) => {
-          capturedMessages = messages;
-          return { action: "open_pr", reason: "clear bug report" };
-        },
+describe("routeTriage", () => {
+  test("classifies newly opened issues", () => {
+    expect(
+      routeTriage({
+        eventName: "issues",
+        eventAction: "opened",
+        isPR: false,
+        labels: [],
+        actor: "alice",
       }),
-    } as any;
+    ).toEqual({ type: "classify" });
+  });
 
-    const ctx = makeContext({ triggerText: "Fix the crash on startup" });
-    const decision = await classifyIssue(fakeModel, ctx, { allowedLabels: ["bug"] });
+  test("ignores pull requests and bot comments", () => {
+    expect(
+      routeTriage({
+        eventName: "issues",
+        eventAction: "opened",
+        isPR: true,
+        labels: [],
+        actor: "alice",
+      }),
+    ).toEqual({ type: "skip", reason: "pull_request" });
+    expect(
+      routeTriage({
+        eventName: "issue_comment",
+        eventAction: "created",
+        isPR: false,
+        labels: [DEFAULT_TRIAGE_LABELS.needsReproduction],
+        actor: "github-actions[bot]",
+      }),
+    ).toEqual({ type: "skip", reason: "bot" });
+  });
 
-    expect(decision).toEqual({ action: "open_pr", reason: "clear bug report" });
-    expect(Array.isArray(capturedMessages)).toBe(true);
-    expect((capturedMessages as any[]).some((m) => m.role === "system")).toBe(true);
-    expect((capturedMessages as any[]).some((m) => m.role === "user")).toBe(true);
+  test("retriages only states where a comment can provide new evidence", () => {
+    expect(
+      routeTriage({
+        eventName: "issue_comment",
+        eventAction: "created",
+        isPR: false,
+        labels: [DEFAULT_TRIAGE_LABELS.unableToFix],
+        actor: "alice",
+      }),
+    ).toEqual({ type: "retriage", state: "unable_to_fix" });
+    expect(
+      routeTriage({
+        eventName: "issue_comment",
+        eventAction: "created",
+        isPR: false,
+        labels: [DEFAULT_TRIAGE_LABELS.fixProposed],
+        actor: "alice",
+      }),
+    ).toEqual({ type: "skip", reason: "terminal_state" });
+  });
+
+  test("starts agentic triage only from the explicit maintainer-run label event", () => {
+    expect(
+      routeTriage({
+        eventName: "issues",
+        eventAction: "labeled",
+        eventLabel: DEFAULT_TRIAGE_LABELS.run,
+        isPR: false,
+        labels: [DEFAULT_TRIAGE_LABELS.needsMaintainer, DEFAULT_TRIAGE_LABELS.run],
+        actor: "maintainer",
+      }),
+    ).toEqual({ type: "run", state: "needs_maintainer" });
   });
 });

@@ -36,6 +36,8 @@ jobs:
       - uses: dipjyotimetia/deep-agent-action@main
         with:
           trigger_phrase: "@agent"
-          model: "claude-sonnet-4-6"
+          model: "claude-sonnet-5"
+          max_runtime_minutes: "10"
+          max_total_tokens: "250000"
         env:
           PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}

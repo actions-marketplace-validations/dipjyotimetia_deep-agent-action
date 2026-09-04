@@ -8,8 +8,9 @@
  */
 import { readFileSync } from "node:fs";
 
-const STATUSES = ["success", "skipped", "refused", "failed", "interrupted"];
+const STATUSES = ["success", "skipped", "refused", "failed"];
 const MODES = ["agent", "review", "noop"];
+const STOP_REASONS = ["budget", "timeout", "stalled"];
 
 export interface ValidationResult {
   ok: boolean;
@@ -52,21 +53,17 @@ export function validateResult(obj: unknown): ValidationResult {
   if (r.approvalPending != null) {
     req(typeof r.approvalPending === "boolean", "approvalPending, when present, must be a boolean");
   }
-  if (r.pendingInterrupts != null) {
-    req(Array.isArray(r.pendingInterrupts), "pendingInterrupts, when present, must be an array");
-    if (Array.isArray(r.pendingInterrupts)) {
-      for (const request of r.pendingInterrupts) {
-        req(
-          typeof request === "object" &&
-            request !== null &&
-            typeof (request as Record<string, unknown>).name === "string",
-          "pendingInterrupts entries must include a string name",
-        );
-      }
-    }
-  }
   if (r.activities != null) {
     req(Array.isArray(r.activities), "activities, when present, must be an array");
+  }
+  if (r.stopReason != null) {
+    req(
+      typeof r.stopReason === "string" && STOP_REASONS.includes(r.stopReason),
+      `stopReason must be one of ${STOP_REASONS.join("|")} (got ${JSON.stringify(r.stopReason)})`,
+    );
+  }
+  if (r.stopDetail != null) {
+    req(typeof r.stopDetail === "string", "stopDetail, when present, must be a string");
   }
 
   return { ok: errors.length === 0, errors };

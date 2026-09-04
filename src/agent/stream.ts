@@ -13,17 +13,12 @@ export interface StreamResult {
   todos: TodoItem[];
   summary: string;
   tokens: TokenUsage;
-  /** Set when the run was aborted early by a budget, runtime, or HITL ceiling. */
+  /** Set when the run was aborted early by a budget, runtime, or loop ceiling. */
   stopped?: StopReason;
-  /** Tool requests held by the deepagents HITL middleware. */
-  pendingInterrupts?: PendingToolRequest[];
+  /** Safe, human-readable explanation for a deliberate stalled stop. */
+  stopDetail?: string;
   /** Deduplicated tool activity observed across main and subagent streams. */
   activities: StreamActivity[];
-}
-
-export interface PendingToolRequest {
-  name: string;
-  args?: unknown;
 }
 
 export interface StreamActivity {
@@ -69,25 +64,6 @@ function mapTodos(raw: unknown): TodoItem[] {
   });
 }
 
-function mapPendingInterrupts(raw: unknown): PendingToolRequest[] | undefined {
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const requests: PendingToolRequest[] = [];
-  for (const item of raw) {
-    const value = (item ?? {}) as { value?: unknown };
-    const interruptValue = (value.value ?? {}) as { actionRequests?: unknown };
-    if (!Array.isArray(interruptValue.actionRequests)) continue;
-    for (const action of interruptValue.actionRequests) {
-      const request = (action ?? {}) as { name?: unknown; args?: unknown };
-      if (typeof request.name !== "string" || !request.name) continue;
-      requests.push({
-        name: request.name,
-        ...(request.args !== undefined ? { args: request.args } : {}),
-      });
-    }
-  }
-  return requests.length ? requests : [];
-}
-
 function messageActivities(messages: BaseMessage[], namespace: string[]): StreamActivity[] {
   const activities: StreamActivity[] = [];
   for (const message of messages) {
@@ -121,6 +97,42 @@ function messageActivities(messages: BaseMessage[], namespace: string[]): Stream
   return activities;
 }
 
+/** Stable in-memory representation for comparing model-provided tool arguments. */
+function stableValue(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableValue(record[key])}`)
+    .join(",")}}`;
+}
+
+function toolCallFingerprints(
+  messages: BaseMessage[],
+  namespace: string[],
+): Array<{ callKey: string; key: string; name: string }> {
+  const fingerprints: Array<{ callKey: string; key: string; name: string }> = [];
+  for (const message of messages) {
+    if (!isAIMessage(message)) continue;
+    for (const call of message.tool_calls ?? []) {
+      if (typeof call.name !== "string" || !call.name) continue;
+      const callKey = `${namespace.join("/")}:${typeof call.id === "string" ? call.id : call.name}`;
+      fingerprints.push({
+        callKey,
+        key: `${namespace.join("/")}:${call.name}:${stableValue(call.args)}`,
+        name: call.name,
+      });
+    }
+  }
+  return fingerprints;
+}
+
+function isRecursionLimitError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /recursion limit.*(?:reached|stop condition)/i.test(message);
+}
+
 /**
  * Drive the agent via streaming, mirroring plan/progress as it goes.
  *
@@ -145,8 +157,10 @@ export async function runAgentStream(
     budget?: BudgetOptions;
     /** When set, abort the run once it has been streaming this long. */
     maxRuntimeMs?: number;
-    /** Max LangGraph super-steps per run (defaulted by `loadConfig`). */
+    /** Max agent super-steps per run (defaulted by `loadConfig`). */
     recursionLimit: number;
+    /** Abort repeated identical tool calls that make no canonical todo progress. */
+    maxRepeatedToolCalls?: number;
   },
 ): Promise<StreamResult> {
   let todos: TodoItem[] = [];
@@ -154,10 +168,13 @@ export async function runAgentStream(
   let finalMessages: BaseMessage[] = [];
   let lastMirrorKey = "";
   let lastMirrorAt = 0;
-  let interrupted = false;
-  let pendingInterrupts: PendingToolRequest[] | undefined;
   const activities: StreamActivity[] = [];
   const activityKeys = new Set<string>();
+  const repeatedToolCallKeys = new Set<string>();
+  const repeatedToolCallCounts = new Map<string, number>();
+  let lastStagnationTodosKey = "";
+  let stalled = false;
+  let stopDetail: string | undefined;
 
   // A budget cap is enforced by a callback meter (which sees subagent calls too);
   // a runtime cap by a timer. Both abort through the same controller, whose
@@ -181,8 +198,8 @@ export async function runAgentStream(
       configurable: { thread_id: options.threadId },
       streamMode: "values",
       subgraphs: true,
-      // A coding loop (read → edit → test → fix) easily exceeds LangGraph's
-      // default of 25 super-steps, so the configured limit defaults well above it.
+      // A coding loop (read → edit → test → fix) can exceed the default
+      // super-step ceiling, so the configured limit defaults well above it.
       recursionLimit: options.recursionLimit,
       signal: controller.signal,
       ...(meter ? { callbacks: [meter] } : {}),
@@ -191,13 +208,28 @@ export async function runAgentStream(
     for await (const item of stream) {
       const { namespace, state } = extractState(item);
       if (!state || typeof state !== "object") continue;
-      const s = state as { todos?: unknown; messages?: unknown; __interrupt__?: unknown };
-      const stateInterrupts = mapPendingInterrupts(s.__interrupt__);
-      if (stateInterrupts !== undefined) {
-        interrupted = true;
-        pendingInterrupts = stateInterrupts;
-      }
+      const s = state as { todos?: unknown; messages?: unknown };
       const stateMessages = Array.isArray(s.messages) ? s.messages.filter(isBaseMessage) : [];
+      if (namespace.length === 0 && Array.isArray(s.todos)) {
+        const nextTodos = mapTodos(s.todos);
+        const nextTodosKey = JSON.stringify(nextTodos);
+        if (nextTodosKey !== lastStagnationTodosKey) {
+          repeatedToolCallCounts.clear();
+          lastStagnationTodosKey = nextTodosKey;
+        }
+      }
+      for (const fingerprint of toolCallFingerprints(stateMessages, namespace.map(String))) {
+        if (repeatedToolCallKeys.has(fingerprint.callKey)) continue;
+        repeatedToolCallKeys.add(fingerprint.callKey);
+        const count = (repeatedToolCallCounts.get(fingerprint.key) ?? 0) + 1;
+        repeatedToolCallCounts.set(fingerprint.key, count);
+        if (options.maxRepeatedToolCalls != null && count >= options.maxRepeatedToolCalls) {
+          stalled = true;
+          stopDetail = `Repeated tool call without todo progress: ${fingerprint.name} (${count} times).`;
+          controller.abort();
+          break;
+        }
+      }
       for (const activity of messageActivities(stateMessages, namespace.map(String))) {
         const key = `${activity.type}:${activity.namespace.join("/")}:${activity.id ?? activity.name}`;
         if (activityKeys.has(key)) continue;
@@ -205,6 +237,8 @@ export async function runAgentStream(
         activities.push(activity);
         if (options.onActivity) await options.onActivity(activity);
       }
+
+      if (stalled) break;
 
       // Only the main agent (empty namespace) drives the canonical plan/summary.
       if (namespace.length !== 0) continue;
@@ -228,7 +262,11 @@ export async function runAgentStream(
     // If the meter or the runtime timer deliberately aborted, whatever
     // cancellation error the stream produced is a clean early stop, not a
     // failure — swallow it regardless of its shape. Any other error propagates.
-    if (!meter?.stopped && !timedOut) throw err;
+    if (!meter?.stopped && !timedOut && !stalled && !isRecursionLimitError(err)) throw err;
+    if (!meter?.stopped && !timedOut && !stalled && isRecursionLimitError(err)) {
+      stalled = true;
+      stopDetail = "The agent reached its recursion ceiling without a stop condition.";
+    }
   } finally {
     // Without this a pending timer keeps the process alive past the run (or
     // fires an abort after a successful completion).
@@ -254,8 +292,8 @@ export async function runAgentStream(
     todos,
     summary: lastAiText(finalMessages),
     tokens,
-    stopped: meter?.stopped ?? (timedOut ? "timeout" : interrupted ? "interrupt" : undefined),
-    ...(pendingInterrupts !== undefined ? { pendingInterrupts } : {}),
+    stopped: meter?.stopped ?? (timedOut ? "timeout" : stalled ? "stalled" : undefined),
+    ...(stopDetail ? { stopDetail } : {}),
     activities,
   };
 }

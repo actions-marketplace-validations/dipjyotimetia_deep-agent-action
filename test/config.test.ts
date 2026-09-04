@@ -7,6 +7,7 @@ import {
   parsePositiveNumber,
   parsePositiveInteger,
 } from "../src/config.js";
+import { DEFAULT_TRIAGE_LABELS } from "../src/modes/triage.js";
 
 describe("normalizeModel", () => {
   test("prefixes a bare claude model with anthropic", () => {
@@ -51,6 +52,13 @@ describe("parseList", () => {
   });
   test("returns empty for undefined", () => {
     expect(parseList(undefined)).toEqual([]);
+  });
+});
+
+describe("loadConfig model default", () => {
+  test("defaults to Claude Sonnet 5", () => {
+    delete process.env.INPUT_MODEL;
+    expect(loadConfig().model).toBe("anthropic:claude-sonnet-5");
   });
 });
 
@@ -118,6 +126,62 @@ describe("loadConfig recursion limit", () => {
   });
 });
 
+describe("loadConfig v2 landing defaults", () => {
+  test("approval-gates landing and keeps the immutable protected-path floor", () => {
+    delete process.env.INPUT_REQUIRE_PUSH_APPROVAL;
+    delete process.env.INPUT_PROTECTED_PATHS;
+    const config = loadConfig();
+    expect(config.requirePushApproval).toBe(true);
+    expect(config.protectedPaths).toContain(".deepagents/**");
+
+    process.env.INPUT_REQUIRE_PUSH_APPROVAL = "false";
+    process.env.INPUT_PROTECTED_PATHS = ".github/workflows/**";
+    try {
+      const configured = loadConfig();
+      expect(configured.requirePushApproval).toBe(false);
+      expect(configured.protectedPaths).toContain(".github/workflows/**");
+      expect(configured.protectedPaths).toContain(".deepagents/**");
+    } finally {
+      delete process.env.INPUT_REQUIRE_PUSH_APPROVAL;
+      delete process.env.INPUT_PROTECTED_PATHS;
+    }
+  });
+});
+
+describe("loadConfig repeated tool-call limit", () => {
+  test("defaults to 8, honors an override, and rejects invalid values", () => {
+    delete process.env.INPUT_MAX_REPEATED_TOOL_CALLS;
+    expect(loadConfig().maxRepeatedToolCalls).toBe(8);
+    process.env.INPUT_MAX_REPEATED_TOOL_CALLS = "12";
+    expect(loadConfig().maxRepeatedToolCalls).toBe(12);
+    process.env.INPUT_MAX_REPEATED_TOOL_CALLS = "0";
+    expect(() => loadConfig()).toThrow("max_repeated_tool_calls");
+    delete process.env.INPUT_MAX_REPEATED_TOOL_CALLS;
+  });
+});
+
+describe("loadConfig triage lifecycle", () => {
+  test("uses the visible lifecycle defaults and validates its bounded retry limit", () => {
+    delete process.env.INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION;
+    delete process.env.INPUT_TRIAGE_MAX_FAILED_ATTEMPTS;
+    expect(loadConfig().triageLabels.needsReproduction).toBe(
+      DEFAULT_TRIAGE_LABELS.needsReproduction,
+    );
+    expect(loadConfig().triageMaxFailedAttempts).toBe(3);
+
+    process.env.INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION = "state: more info";
+    process.env.INPUT_TRIAGE_MAX_FAILED_ATTEMPTS = "4";
+    try {
+      const config = loadConfig();
+      expect(config.triageLabels.needsReproduction).toBe("state: more info");
+      expect(config.triageMaxFailedAttempts).toBe(4);
+    } finally {
+      delete process.env.INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION;
+      delete process.env.INPUT_TRIAGE_MAX_FAILED_ATTEMPTS;
+    }
+  });
+});
+
 describe("loadConfig runner timing inputs", () => {
   test("rejects non-positive or fractional shell timeouts and comment debounce values", () => {
     process.env.INPUT_SHELL_TIMEOUT_SECONDS = "-1";
@@ -134,24 +198,47 @@ describe("loadConfig runner timing inputs", () => {
 });
 
 describe("loadConfig deepagents policy", () => {
-  test("loads strict profile, permission, and interrupt JSON inputs", () => {
+  test("loads strict profile and permission JSON inputs", () => {
     process.env.INPUT_HARNESS_PROFILE = JSON.stringify({
       systemPromptSuffix: "Use the repository conventions.",
     });
     process.env.INPUT_FILESYSTEM_PERMISSIONS = JSON.stringify([
       { operations: ["read"], paths: ["/src/**"] },
     ]);
-    process.env.INPUT_INTERRUPT_ON = JSON.stringify({ publish_release: true });
 
     try {
       const config = loadConfig();
       expect(config.harnessProfile?.systemPromptSuffix).toBe("Use the repository conventions.");
       expect(config.filesystemPermissions).toEqual([{ operations: ["read"], paths: ["/src/**"] }]);
-      expect(config.interruptOn).toEqual({ publish_release: true });
     } finally {
       delete process.env.INPUT_HARNESS_PROFILE;
       delete process.env.INPUT_FILESYSTEM_PERMISSIONS;
-      delete process.env.INPUT_INTERRUPT_ON;
+    }
+  });
+
+  test("loads strict specialist subagent JSON", () => {
+    process.env.INPUT_SUBAGENTS = JSON.stringify([
+      {
+        name: "release-reviewer",
+        description: "Reviews releases.",
+        systemPrompt: "Report concise findings.",
+        mcpTools: ["publish_release"],
+        responseMode: "findings",
+      },
+    ]);
+
+    try {
+      expect(loadConfig().subagents).toEqual([
+        {
+          name: "release-reviewer",
+          description: "Reviews releases.",
+          systemPrompt: "Report concise findings.",
+          mcpTools: ["publish_release"],
+          responseMode: "findings",
+        },
+      ]);
+    } finally {
+      delete process.env.INPUT_SUBAGENTS;
     }
   });
 });

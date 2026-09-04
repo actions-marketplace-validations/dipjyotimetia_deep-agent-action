@@ -5,15 +5,11 @@ import {
   type FilesystemPermission,
   type HarnessProfile,
 } from "deepagents";
-import type { InterruptOnConfig } from "langchain";
 import { z } from "zod";
 
 /** Repository-local deepagents memory and skill locations. */
 export const DEEPAGENTS_MEMORY_PATH = "/.deepagents/AGENTS.md";
 export const DEEPAGENTS_SKILLS_PATH = "/.deepagents/skills/";
-
-/** JSON-compatible interrupt rules accepted by the action configuration. */
-export type InterruptPolicy = Record<string, boolean | InterruptOnConfig>;
 
 const permissionSchema = z
   .object({
@@ -33,19 +29,6 @@ const permissionSchema = z
       }
     }
   });
-
-const interruptRuleSchema = z.union([
-  z.boolean(),
-  z
-    .object({
-      allowedDecisions: z.array(z.enum(["approve", "edit", "reject"])).min(1),
-      description: z.string().optional(),
-      argsSchema: z.record(z.string(), z.any()).optional(),
-    })
-    .strict(),
-]);
-
-const interruptPolicySchema = z.record(z.string().min(1), interruptRuleSchema);
 
 function parseJson(raw: string | undefined, name: string): unknown | undefined {
   if (!raw?.trim()) return undefined;
@@ -105,25 +88,6 @@ export function parseFilesystemPermissionsValue(
   return parsed.data;
 }
 
-/** Parse optional JSON tool interrupt rules. */
-export function parseInterruptPolicy(
-  raw: string | undefined,
-  name = "interrupt_on",
-): InterruptPolicy | undefined {
-  const value = parseJson(raw, name);
-  if (value === undefined) return undefined;
-  return parseInterruptPolicyValue(value, name);
-}
-
-/** Validate an already-parsed YAML/JSON interrupt-policy value. */
-export function parseInterruptPolicyValue(value: unknown, name = "interrupt_on"): InterruptPolicy {
-  const parsed = interruptPolicySchema.safeParse(value);
-  if (!parsed.success) {
-    throw new Error(`${name} is invalid: ${parsed.error.message}`);
-  }
-  return parsed.data as InterruptPolicy;
-}
-
 /** Find existing repository-local deepagents sources without reading them. */
 export function discoverDeepAgentSources(rootDir: string): {
   memory?: string[];
@@ -164,16 +128,6 @@ export function buildReviewFilesystemPermissions(
     { operations: ["write"], paths: ["/**"], mode: "deny" },
     ...(custom ?? []),
   ];
-}
-
-/** Interrupt all configured MCP tools by default, with explicit overrides. */
-export function buildInterruptPolicy(
-  mcpToolNames: string[],
-  custom?: InterruptPolicy,
-): InterruptPolicy {
-  const defaults: InterruptPolicy = {};
-  for (const name of mcpToolNames) defaults[name] = true;
-  return { ...defaults, ...(custom ?? {}) };
 }
 
 function isFile(path: string): boolean {

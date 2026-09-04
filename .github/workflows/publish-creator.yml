@@ -1,0 +1,27 @@
+name: Publish creator
+
+on:
+  push:
+    tags:
+      - "create-deep-agent-action-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish public creator package
+        working-directory: packages/create-deep-agent-action
+        run: npm publish --access public --provenance

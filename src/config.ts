@@ -1,11 +1,9 @@
 import * as core from "@actions/core";
 import type { Config } from "./types.js";
-import type { RepoConfig } from "./config/repoConfig.js";
-import {
-  parseFilesystemPermissions,
-  parseHarnessProfile,
-  parseInterruptPolicy,
-} from "./agent/policy.js";
+import { parseFilesystemPermissions, parseHarnessProfile } from "./agent/policy.js";
+import { parseSubagents } from "./agent/subagents.js";
+import { DEFAULT_PROTECTED_PATHS, parseProtectedPaths } from "./github/protectedPaths.js";
+import { DEFAULT_TRIAGE_LABELS, type TriageLabels } from "./modes/triage.js";
 
 /** Default shell commands the agent is allowed to run. */
 export const DEFAULT_ALLOWED_COMMANDS = [
@@ -55,7 +53,7 @@ export const DEFAULT_DENIED_COMMANDS = [
 
 /**
  * Normalize a model id into a provider-prefixed form.
- * `claude-sonnet-4-6` -> `{ provider: "anthropic", name: "claude-sonnet-4-6", full: "anthropic:claude-sonnet-4-6" }`
+ * `claude-sonnet-5` -> `{ provider: "anthropic", name: "claude-sonnet-5", full: "anthropic:claude-sonnet-5" }`
  * `openai:gpt-5` -> `{ provider: "openai", name: "gpt-5", full: "openai:gpt-5" }`
  */
 /** Bare-model-name prefix → provider inference (when no explicit `provider:` prefix). */
@@ -138,6 +136,38 @@ function inputOrEnv(name: string, envNames: string[]): string {
   return "";
 }
 
+/** Read a triage label input without ever allowing an empty state label. */
+function triageLabelInput(name: string, fallback: string): string {
+  return core.getInput(name).trim() || fallback;
+}
+
+function loadTriageLabels(): TriageLabels {
+  return {
+    needsTriage: triageLabelInput("triage_label_needs_triage", DEFAULT_TRIAGE_LABELS.needsTriage),
+    needsReproduction: triageLabelInput(
+      "triage_label_needs_reproduction",
+      DEFAULT_TRIAGE_LABELS.needsReproduction,
+    ),
+    unableToReproduce: triageLabelInput(
+      "triage_label_unable_to_reproduce",
+      DEFAULT_TRIAGE_LABELS.unableToReproduce,
+    ),
+    unableToFix: triageLabelInput("triage_label_unable_to_fix", DEFAULT_TRIAGE_LABELS.unableToFix),
+    needsMaintainer: triageLabelInput(
+      "triage_label_needs_maintainer",
+      DEFAULT_TRIAGE_LABELS.needsMaintainer,
+    ),
+    fixProposed: triageLabelInput("triage_label_fix_proposed", DEFAULT_TRIAGE_LABELS.fixProposed),
+    notActionable: triageLabelInput(
+      "triage_label_not_actionable",
+      DEFAULT_TRIAGE_LABELS.notActionable,
+    ),
+    skipped: triageLabelInput("triage_label_skipped", DEFAULT_TRIAGE_LABELS.skipped),
+    failed: triageLabelInput("triage_label_failed", DEFAULT_TRIAGE_LABELS.failed),
+    run: triageLabelInput("triage_run_label", DEFAULT_TRIAGE_LABELS.run),
+  };
+}
+
 /** Load and normalize action inputs from the environment. */
 export function loadConfig(): Config {
   const allowedCommands = parseList(core.getInput("allowed_commands"));
@@ -146,7 +176,7 @@ export function loadConfig(): Config {
   return {
     triggerPhrase: core.getInput("trigger_phrase") || "@agent",
     prompt: core.getInput("prompt") || undefined,
-    model: normalizeModel(core.getInput("model") || "claude-sonnet-4-6").full,
+    model: normalizeModel(core.getInput("model") || "claude-sonnet-5").full,
     baseUrl: core.getInput("base_url") || undefined,
     allowedPermissions: parseList(core.getInput("allowed_permissions") || "write,admin"),
     allowedCommands: allowedCommands.length ? allowedCommands : DEFAULT_ALLOWED_COMMANDS,
@@ -155,16 +185,26 @@ export function loadConfig(): Config {
     autoRunLabel: core.getInput("auto_run_label") || undefined,
     autoRunAssignee: core.getInput("auto_run_assignee") || undefined,
     autoRunDefaultInstruction: core.getInput("auto_run_default_instruction") || undefined,
-    requirePushApproval: parseBool(core.getInput("require_push_approval")),
+    requirePushApproval: parseBool(core.getInput("require_push_approval") || "true"),
     verifiedCommits: parseBool(core.getInput("verified_commits")),
-    applySuggestions: parseBool(core.getInput("apply_suggestions")),
     enableTriage: parseBool(core.getInput("enable_triage")),
     triageAllowedLabels: parseList(core.getInput("triage_allowed_labels")),
     triageModel: core.getInput("triage_model") || undefined,
+    triageLabels: loadTriageLabels(),
+    triageBotLogins: parseList(core.getInput("triage_bot_logins")),
+    triageMaxFailedAttempts:
+      parsePositiveInteger(
+        core.getInput("triage_max_failed_attempts"),
+        "triage_max_failed_attempts",
+      ) ?? 3,
     mcpConfig: core.getInput("mcp_config") || "",
     harnessProfile: parseHarnessProfile(core.getInput("harness_profile")),
     filesystemPermissions: parseFilesystemPermissions(core.getInput("filesystem_permissions")),
-    interruptOn: parseInterruptPolicy(core.getInput("interrupt_on")),
+    subagents: parseSubagents(core.getInput("subagents")),
+    protectedPaths: [
+      ...DEFAULT_PROTECTED_PATHS,
+      ...parseProtectedPaths(core.getInput("protected_paths")),
+    ],
     shellTimeoutSeconds:
       parsePositiveInteger(core.getInput("shell_timeout_seconds"), "shell_timeout_seconds") ?? 600,
     commentDebounceMs:
@@ -177,25 +217,9 @@ export function loadConfig(): Config {
     ),
     recursionLimit:
       parsePositiveInteger(core.getInput("recursion_limit"), "recursion_limit") ?? 150,
-  };
-}
-
-/**
- * Apply per-repo overrides on top of the input-derived config. A repo file may
- * narrow/extend the allow-list and change the model, but the built-in
- * deny-list is always re-merged so a committed config cannot weaken it.
- */
-export function mergeRepoConfig(base: Config, repo: RepoConfig): Config {
-  return {
-    ...base,
-    model: repo.model ? normalizeModel(repo.model).full : base.model,
-    allowedCommands: repo.allowedCommands?.length ? repo.allowedCommands : base.allowedCommands,
-    deniedCommands: [...new Set([...base.deniedCommands, ...(repo.deniedCommands ?? [])])],
-    autoRunLabel: repo.autoRunLabel ?? base.autoRunLabel,
-    autoRunAssignee: repo.autoRunAssignee ?? base.autoRunAssignee,
-    harnessProfile: base.harnessProfile ?? repo.harnessProfile,
-    filesystemPermissions: base.filesystemPermissions ?? repo.filesystemPermissions,
-    interruptOn: base.interruptOn ?? repo.interruptOn,
+    maxRepeatedToolCalls:
+      parsePositiveInteger(core.getInput("max_repeated_tool_calls"), "max_repeated_tool_calls") ??
+      8,
   };
 }
 

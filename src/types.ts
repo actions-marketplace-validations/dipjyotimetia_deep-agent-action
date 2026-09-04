@@ -51,7 +51,7 @@ export interface Config {
   triggerPhrase: string;
   /** Explicit prompt for workflow_dispatch (bypasses the phrase). */
   prompt?: string;
-  /** Provider-prefixed model id, e.g. "anthropic:claude-sonnet-4-6". */
+  /** Provider-prefixed model id, e.g. "anthropic:claude-sonnet-5". */
   model: string;
   /** Base URL for the `openai-compatible` provider (Groq, xAI, DeepSeek, Ollama, vLLM, …). */
   baseUrl?: string;
@@ -74,8 +74,6 @@ export interface Config {
    * Requires GitHub App auth; file-mode/symlink changes are not preserved.
    */
   verifiedCommits: boolean;
-  /** When true, every review run also applies its own single-line suggestions and lands them. */
-  applySuggestions: boolean;
   /**
    * When true, a new issue with no trigger phrase is classified by a cheap
    * one-shot model call that decides whether to open a PR, request a review,
@@ -87,14 +85,22 @@ export interface Config {
   triageAllowedLabels: string[];
   /** Model used for the triage classification call; defaults to `model`. */
   triageModel?: string;
+  /** Named, visible GitHub labels that encode the opt-in triage lifecycle. */
+  triageLabels: import("./modes/triage.js").TriageLabels;
+  /** Extra bot logins whose comments must never wake a waiting triage state. */
+  triageBotLogins: string[];
+  /** Automatic triage failures permitted before retries require manual intervention. */
+  triageMaxFailedAttempts: number;
   /** Raw MCP server config JSON (optional); empty string when unset. */
   mcpConfig: string;
   /** Optional validated deepagents harness profile. */
   harnessProfile?: import("deepagents").HarnessProfile;
   /** Optional validated deepagents filesystem permission rules. */
   filesystemPermissions?: import("deepagents").FilesystemPermission[];
-  /** Optional validated deepagents tool interrupt rules. */
-  interruptOn?: import("./agent/policy.js").InterruptPolicy;
+  /** Optional validated synchronous specialist-subagent declarations. */
+  subagents?: import("./agent/subagents.js").DeepAgentSubagentConfig[];
+  /** Immutable protected paths plus workflow-owner extensions that can never be published. */
+  protectedPaths: string[];
   shellTimeoutSeconds: number;
   /** Minimum interval between tracking-comment edits, ms. */
   commentDebounceMs: number;
@@ -104,8 +110,10 @@ export interface Config {
   maxTotalTokens?: number;
   /** Abort the agent once it has run this many minutes; partial work lands for review. */
   maxRuntimeMinutes?: number;
-  /** Max LangGraph super-steps per run (defaults to 150). */
+  /** Max agent super-steps per run (defaults to 150). */
   recursionLimit: number;
+  /** Stop repeated identical tool calls that make no canonical todo progress. */
+  maxRepeatedToolCalls: number;
 }
 
 /** Token usage for a run. */
@@ -115,10 +123,10 @@ export interface TokenUsage {
 }
 
 /** Outcome status surfaced as the `status` output. */
-export type RunStatus = "success" | "skipped" | "refused" | "failed" | "interrupted";
+export type RunStatus = "success" | "skipped" | "refused" | "failed";
 
 /** Why a run was deliberately stopped early (partial work lands for review). */
-export type StopReason = "budget" | "timeout" | "interrupt";
+export type StopReason = "budget" | "timeout" | "stalled";
 
 /** One recorded tool invocation for the audit record. */
 export interface ToolCallRecord {
@@ -145,10 +153,10 @@ export interface RunRecord {
   costUsd?: number;
   /** True when changes were gated behind approval (draft PR / proposed branch). */
   approvalPending?: boolean;
-  /** Set when the run was deliberately stopped early (budget ceiling / runtime cap). */
+  /** Set when the run was deliberately stopped early (budget, runtime, or stalled loop). */
   stopReason?: StopReason;
-  /** Tool calls held for approval when deepagents interrupted the run. */
-  pendingInterrupts?: import("./agent/stream.js").PendingToolRequest[];
+  /** Safe detail for a stalled stop; never contains raw tool arguments. */
+  stopDetail?: string;
   /** Deduplicated tool/subagent activity observed during the run. */
   activities?: import("./agent/stream.js").StreamActivity[];
 }

@@ -3,6 +3,58 @@ import { githubServerUrl, type Octokit } from "./client.js";
 import { truncateBody } from "./text.js";
 import type { GitHubContext } from "../types.js";
 
+/** Normalize porcelain output into every affected repository-relative path. */
+export function changedPathsFromPorcelain(porcelain: string): string[] {
+  if (porcelain.includes("\0")) return changedPathsFromPorcelainZ(porcelain);
+  const paths: string[] = [];
+  for (const line of porcelain.split("\n")) {
+    if (!line.trim()) continue;
+    const status = line.slice(0, 2);
+    const value = line.slice(3).trim();
+    if ((status.includes("R") || status.includes("C")) && value.includes(" -> ")) {
+      paths.push(
+        ...value
+          .split(" -> ")
+          .map((path) => path.trim())
+          .filter(Boolean),
+      );
+    } else if (value) {
+      paths.push(value);
+    }
+  }
+  return paths;
+}
+
+/**
+ * Parse `git status --porcelain=v1 -z` without relying on Git's display
+ * quoting. A rename/copy carries a second NUL-delimited source path.
+ */
+function changedPathsFromPorcelainZ(porcelain: string): string[] {
+  const records = porcelain.split("\0");
+  const paths: string[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i]!;
+    if (!record) continue;
+    const status = record.slice(0, 2);
+    const path = record.slice(3);
+    if (path) paths.push(path);
+    if (status.includes("R") || status.includes("C")) {
+      const source = records[++i];
+      if (source) paths.push(source);
+    }
+  }
+  return paths;
+}
+
+class GitCommandError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+
 /**
  * Run git with arguments (no shell — args are passed directly, injection-safe).
  * Failures are rethrown with the stderr detail (execFileSync puts it on the
@@ -15,15 +67,21 @@ export function runGit(args: string[], cwd: string): string {
   try {
     return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
   } catch (err) {
-    const e = err as { stderr?: unknown; message?: string };
+    const e = err as { stderr?: unknown; message?: string; status?: unknown };
     const detail =
       typeof e.stderr === "string" && e.stderr.trim()
         ? e.stderr.trim()
         : (e.message ?? String(err));
-    throw new Error(
+    throw new GitCommandError(
       `git ${args[0]} failed: ${detail}`.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@"),
+      typeof e.status === "number" ? e.status : undefined,
     );
   }
+}
+
+/** Git returns exit status 2 when `ls-remote --exit-code` finds no matching ref. */
+export function isMissingRemoteBranchStatus(status: number | undefined): boolean {
+  return status === 2;
 }
 
 /** Run `git push`, layering actionable hints onto known rejection messages. */
@@ -122,22 +180,52 @@ export function checkoutIssueBranchIfExists(
 ): boolean {
   const url = pushUrl(token, owner, repo);
   try {
-    runGit(["fetch", "--depth=1", url, branch], rootDir);
-  } catch {
-    return false;
+    runGit(["ls-remote", "--exit-code", "--heads", url, `refs/heads/${branch}`], rootDir);
+  } catch (err) {
+    if (err instanceof GitCommandError && isMissingRemoteBranchStatus(err.status)) return false;
+    throw err;
   }
+  runGit(["fetch", "--depth=1", url, branch], rootDir);
   runGit(["checkout", "-B", branch, "FETCH_HEAD"], rootDir);
   return true;
 }
 
 /** Files with uncommitted changes in the workspace. */
 export function listChangedFiles(rootDir: string): string[] {
-  const out = runGit(["status", "--porcelain"], rootDir);
-  if (!out) return [];
-  return out
-    .split("\n")
-    .map((l) => l.slice(3).trim())
-    .filter(Boolean);
+  const out = runGit(["status", "--porcelain=v1", "-z"], rootDir);
+  return changedPathsFromPorcelain(out);
+}
+
+/**
+ * Remove credentials persisted by actions/checkout before the model can invoke
+ * allow-listed `git` commands. Control-plane fetch/push uses explicit tokenized
+ * URLs, never the checkout's local credential configuration.
+ */
+export function stripCheckoutCredentials(rootDir: string, originUrl?: string): void {
+  try {
+    const keys = runGit(
+      ["config", "--local", "--name-only", "--get-regexp", "^http\\..*\\.extraheader$"],
+      rootDir,
+    )
+      .split("\n")
+      .filter(Boolean);
+    for (const key of keys) runGit(["config", "--local", "--unset-all", key], rootDir);
+  } catch {
+    // No persisted checkout header is the common local-development case.
+  }
+  try {
+    runGit(["config", "--local", "--unset-all", "credential.helper"], rootDir);
+  } catch {
+    // No local credential helper is also expected in a clean checkout.
+  }
+  if (originUrl) {
+    try {
+      runGit(["remote", "set-url", "origin", originUrl], rootDir);
+    } catch {
+      // Some tests/manual workflows do not configure origin; control-plane URLs
+      // remain explicit, so a missing remote cannot restore agent credentials.
+    }
+  }
 }
 
 /** Configure the bot commit identity. */

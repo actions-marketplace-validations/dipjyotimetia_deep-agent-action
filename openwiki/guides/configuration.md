@@ -15,78 +15,80 @@ Defined in [`action.yml`](../../action.yml), parsed by `src/config.ts:loadConfig
 
 ### Triggering
 
-| Input | Default | Description |
-|---|---|---|
-| `trigger_phrase` | `@agent` | Phrase that triggers the agent in issue/PR/comment bodies. |
-| `prompt` | — | Explicit instruction for `workflow_dispatch` runs (bypasses the trigger phrase). |
-| `auto_run_label` | — | Label that triggers the agent without a trigger-phrase match. |
-| `auto_run_assignee` | — | GitHub username that, when assigned, triggers the agent. |
-| `auto_run_default_instruction` | — | Fallback instruction for auto-run events when the issue has no usable text. |
+| Input                          | Default  | Description                                                                      |
+| ------------------------------ | -------- | -------------------------------------------------------------------------------- |
+| `trigger_phrase`               | `@agent` | Phrase that triggers the agent in issue/PR/comment bodies.                       |
+| `prompt`                       | —        | Explicit instruction for `workflow_dispatch` runs (bypasses the trigger phrase). |
+| `auto_run_label`               | —        | Label that triggers the agent without a trigger-phrase match.                    |
+| `auto_run_assignee`            | —        | GitHub username that, when assigned, triggers the agent.                         |
+| `auto_run_default_instruction` | —        | Fallback instruction for auto-run events when the issue has no usable text.      |
 
 ### Model
 
-| Input | Default | Description |
-|---|---|---|
-| `model` | `claude-sonnet-4-6` | Model id, optionally provider-prefixed (e.g. `openai:gpt-5`). |
-| `base_url` | — | Endpoint URL for the `openai-compatible` provider. |
+| Input      | Default             | Description                                                   |
+| ---------- | ------------------- | ------------------------------------------------------------- |
+| `model`    | `claude-sonnet-4-6` | Model id, optionally provider-prefixed (e.g. `openai:gpt-5`). |
+| `base_url` | —                   | Endpoint URL for the `openai-compatible` provider.            |
 
 ### Authorization
 
-| Input | Default | Description |
-|---|---|---|
+| Input                 | Default       | Description                                                     |
+| --------------------- | ------------- | --------------------------------------------------------------- |
 | `allowed_permissions` | `write,admin` | Comma-separated permission levels allowed to trigger the agent. |
-| `fork_allow_label` | — | Label a write-access user can apply to authorize fork-PR runs. |
+| `fork_allow_label`    | —             | Label a write-access user can apply to authorize fork-PR runs.  |
 
 ### Landing
 
-| Input | Default | Description |
-|---|---|---|
-| `require_push_approval` | `false` | Gate changes behind human review (draft PR or proposed branch). |
-| `verified_commits` | `false` | Land via `createCommitOnBranch` GraphQL mutation for "Verified" commits. Requires GitHub App auth. |
-| `apply_suggestions` | `false` | Always apply review suggestions and land them (even without "and fix"). |
+| Input                   | Default | Description                                                                                        |
+| ----------------------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `require_push_approval` | `false` | Gate changes behind human review (draft PR or proposed branch).                                    |
+| `verified_commits`      | `false` | Land via `createCommitOnBranch` GraphQL mutation for "Verified" commits. Requires GitHub App auth. |
+| `apply_suggestions`     | `false` | Always apply review suggestions and land them (even without "and fix").                            |
 
 ### Triage (Opt-In)
 
-| Input | Default | Description |
-|---|---|---|
-| `enable_triage` | `false` | Classify new issues with no trigger phrase via a one-shot LLM call. |
-| `triage_allowed_labels` | — | Labels the triage classifier may apply; anything outside is ignored. |
-| `triage_model` | — | Model for triage classification; defaults to `model`. |
+| Input                   | Default | Description                                                          |
+| ----------------------- | ------- | -------------------------------------------------------------------- |
+| `enable_triage`               | `false`     | Enable the label-backed lifecycle for issues without a trigger phrase. |
+| `triage_label_*`              | `triage: …` | Lifecycle labels; create them in the target repository before enabling triage. |
+| `triage_run_label`            | `triage: run` | Label a permitted maintainer applies to start an agentic run. |
+| `triage_bot_logins`           | —           | Extra bot accounts whose comments are ignored. |
+| `triage_max_failed_attempts`  | `3`         | Cap on automatic retries after failed triage. |
+| `triage_model`                | —           | Model for lifecycle classification; defaults to `model`. |
 
 ### Shell Guardrails
 
-| Input | Default | Description |
-|---|---|---|
-| `allowed_commands` | 25-command list | Comma/newline-separated allow-list of shell command names. |
-| `denied_commands` | — | Extra commands to block (merged with the built-in deny-list). |
-| `shell_timeout_seconds` | `600` | Max seconds for a single shell command. |
+| Input                   | Default         | Description                                                   |
+| ----------------------- | --------------- | ------------------------------------------------------------- |
+| `allowed_commands`      | 25-command list | Comma/newline-separated allow-list of shell command names.    |
+| `denied_commands`       | —               | Extra commands to block (merged with the built-in deny-list). |
+| `shell_timeout_seconds` | `600`           | Max seconds for a single shell command.                       |
 
 ### Identity
 
-| Input | Default | Description |
-|---|---|---|
-| `github_token` | `${{ github.token }}` | Token for GitHub API/git operations. PRs opened with this don't trigger CI. |
-| `app_id` | — | GitHub App id for scoped, short-lived installation tokens. |
-| `app_private_key` | — | GitHub App private key (PEM). |
+| Input             | Default               | Description                                                                 |
+| ----------------- | --------------------- | --------------------------------------------------------------------------- |
+| `github_token`    | `${{ github.token }}` | Token for GitHub API/git operations. PRs opened with this don't trigger CI. |
+| `app_id`          | —                     | GitHub App id for scoped, short-lived installation tokens.                  |
+| `app_private_key` | —                     | GitHub App private key (PEM).                                               |
 
 ### Cost & Runtime Controls
 
-| Input | Default | Description |
-|---|---|---|
-| `max_cost_usd` | — | Abort run once estimated spend reaches this many USD. |
-| `max_total_tokens` | — | Abort run once cumulative billed tokens reach this many. |
-| `max_runtime_minutes` | — | Abort the agent after this many minutes; partial work lands for review. |
-| `recursion_limit` | `150` | Max LangGraph super-steps per run. |
+| Input                 | Default | Description                                                             |
+| --------------------- | ------- | ----------------------------------------------------------------------- |
+| `max_cost_usd`        | —       | Abort run once estimated spend reaches this many USD.                   |
+| `max_total_tokens`    | —       | Abort run once cumulative billed tokens reach this many.                |
+| `max_runtime_minutes` | —       | Abort the agent after this many minutes; partial work lands for review. |
+| `recursion_limit`     | `150`   | Max LangGraph super-steps per run.                                      |
 
 ### Tools & UX
 
-| Input | Default | Description |
-|---|---|---|
-| `mcp_config` | — | MCP servers JSON: `{ "mcpServers": { name: { command, args, env } | { url } } }`. |
-| `harness_profile` | — | Optional deepagents harness profile JSON. |
-| `filesystem_permissions` | — | Optional deepagents filesystem permission rules JSON. |
-| `interrupt_on` | — | Optional HITL interrupt policy JSON. MCP tools require approval by default. |
-| `comment_debounce_ms` | `8000` | Minimum interval between tracking-comment progress edits. |
+| Input                    | Default | Description                                                       |
+| ------------------------ | ------- | ----------------------------------------------------------------- |
+| `mcp_config`             | —       | MCP servers JSON: `{ "mcpServers": { name: { command, args, env } | { url } } }`. |
+| `harness_profile`        | —       | Optional deepagents harness profile JSON.                         |
+| `filesystem_permissions` | —       | Optional deepagents filesystem permission rules JSON.             |
+| `comment_debounce_ms`    | `8000`  | Minimum interval between tracking-comment progress edits.         |
 
 ## Environment Variables
 
@@ -100,6 +102,7 @@ Provider API keys resolve with this fallback order (via `resolveProviderApiKey()
 6. `OPENROUTER_API_KEY` env
 
 Provider-specific auth chains:
+
 - **Azure:** `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_INSTANCE_NAME`, `AZURE_OPENAI_API_DEPLOYMENT_NAME`, `AZURE_OPENAI_API_VERSION`
 - **AWS Bedrock:** standard AWS env chain (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, etc.)
 - **GCP Vertex AI:** standard GCP ADC (`GOOGLE_APPLICATION_CREDENTIALS` or `gcloud auth application-default login`)
@@ -116,33 +119,12 @@ An optional YAML file committed to the repository, loaded by `src/config/repoCon
 
 ```yaml
 system_prompt: "Additional system prompt text appended to the base prompt"
-allowed_commands:
-  - git
-  - node
-denied_commands:
-  - rm
-model: "openai:gpt-5"
-auto_run_label: "agent"
-auto_run_assignee: "agent-bot"
-harness_profile:
-  systemPromptSuffix: "..."
-  excludedTools:
-    - some_tool
-filesystem_permissions:
-  - operations: [read, write]
-    paths: ["/tmp/**"]
-    mode: allow
-interrupt_on:
-  some_tool: false
 ```
 
 **Merge semantics:**
 
-- Repo config overlays action inputs.
-- Repo can narrow the command allow-list and add denials.
-- **The built-in deny-list (`DEFAULT_DENIED_COMMANDS`) is always re-merged** — a committed config can never remove a default denial.
-- Per-field `.catch()` in the Zod schema means one malformed value doesn't discard the rest.
-- Best-effort: parse failure logs a warning and returns `{}` (never aborts a run).
+- The repository file can add guidance only; model, shell policy, budgets, filesystem rules, MCP, subagents, and landing policy remain workflow-owner configuration.
+- Unknown fields are ignored and malformed config logs a warning rather than aborting the run.
 
 ## Built-in Shell Command Lists
 

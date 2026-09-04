@@ -32,6 +32,10 @@ Auto-fix formatting with `bun run format`.
 
 The **smoke** check (`DEEP_AGENT_SMOKE=1 bun run src/index.ts`) instantiates all provider models and exits. It catches import/packaging issues that the source-run tests miss, so run it after touching dependencies or [`src/agent/model.ts`](src/agent/model.ts).
 
+## Publishing the setup creator
+
+`packages/create-deep-agent-action` is an independently publishable, Node-only package. Set an npm automation token as the protected `NPM_TOKEN` repository secret, then update its version and push a matching `create-deep-agent-action-v*` tag (or use the protected **Publish creator** workflow) to publish it with npm provenance. The root action package remains private and is never published by that workflow.
+
 ## Project layout
 
 ```
@@ -73,13 +77,13 @@ Two layers:
 
 **Unit tests** (`bun test`) — fast, deterministic, no network. They cover the pure logic module by module: routing, trigger parsing, permission/actor/fork gating, cost estimation, comment rendering, and the E2E harness helpers in `scripts/e2e/`. These run in [CI](.github/workflows/ci.yml) on every push. Run a subset with `bun test test/<file>.test.ts`.
 
-**Live E2E** ([`.github/workflows/e2e.yml`](.github/workflows/e2e.yml)) — runs the action *as shipped* against this repository with a real model and the real GitHub API, then cleans up. It's the only layer that exercises the full `src/index.ts` orchestration end to end. Jobs:
+**Live E2E** ([`.github/workflows/e2e.yml`](.github/workflows/e2e.yml)) — runs the action _as shipped_ against this repository with a real model and the real GitHub API, then cleans up. It's the only layer that exercises the full `src/index.ts` orchestration end to end. Jobs:
 
-| Job | Verifies |
-|---|---|
-| `implement` | `workflow_dispatch` + prompt opens a real PR; `status=success`; `result_json` and the invocation-scoped audit artifact are well-formed. |
-| `approval-gate` | `require_push_approval: true` lands the change as a **draft** PR with `approvalPending`. |
-| `budget-cap` | A tiny `max_total_tokens` aborts the run mid-flight; `budget_stopped=true`, and any partial work lands as a draft PR. |
+| Job             | Verifies                                                                                                                                |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `implement`     | `workflow_dispatch` + prompt opens a real PR; `status=success`; `result_json` and the invocation-scoped audit artifact are well-formed. |
+| `approval-gate` | `require_push_approval: true` lands the change as a **draft** PR with `approvalPending`.                                                |
+| `budget-cap`    | A tiny `max_total_tokens` aborts the run mid-flight; `budget_stopped=true`, and any partial work lands as a draft PR.                   |
 
 How to run: **Actions → E2E → Run workflow** (it also runs nightly). It needs the `PROVIDER_API_KEY` repository secret (defaults to `openai:gpt-4o-mini`); when the secret is absent every job **skips cleanly** rather than failing. Each run makes a few tiny model calls — cents. The harness helpers are pure and unit-tested, so you can validate their logic locally without a live run:
 
@@ -88,18 +92,19 @@ echo '{"status":"success","mode":"agent","model":"x","plan":[],"toolCalls":[],"f
   | bun run scripts/e2e/assert-result.ts                      # validates a result_json
 ```
 
-**Live E2E — dogfood harness** ([`.github/workflows/e2e-live-events.yml`](.github/workflows/e2e-live-events.yml) + [`e2e-live-orchestrator.yml`](.github/workflows/e2e-live-orchestrator.yml)) — the E2E jobs above only ever exercise `workflow_dispatch`. Looking at `src/modes/detector.ts::detectMode`, an explicit `prompt` short-circuits straight to `"agent"` mode for *any* event name, so `workflow_dispatch` structurally can never reach trigger-phrase detection, review mode, label/assignee auto-run, resume/continue, or the thread-context fetch (`src/github/thread.ts`) — all of which only run on a real `ctx.entityNumber` from a real issue/PR event. GitHub also won't let a runner fake `GITHUB_EVENT_*`, so the only way to exercise these is with **real GitHub events**: `e2e-live-orchestrator.yml` (`workflow_dispatch` only, no schedule) creates real synthetic issues/PRs/comments in this repo via `scripts/e2e/live/scenario-*.ts`, and `e2e-live-events.yml` — a real reactive consumer workflow, isolated behind the dedicated `@e2e-agent` trigger phrase and `e2e-agent-autorun`/`e2e-resume-cap` labels so it can never collide with genuine repo conversation — reacts to them with `uses: ./`. Four scenarios:
+**Live E2E — dogfood harness** ([`.github/workflows/e2e-live-events.yml`](.github/workflows/e2e-live-events.yml) + [`e2e-live-orchestrator.yml`](.github/workflows/e2e-live-orchestrator.yml)) — the E2E jobs above only ever exercise `workflow_dispatch`. Looking at `src/modes/detector.ts::detectMode`, an explicit `prompt` short-circuits straight to `"agent"` mode for _any_ event name, so `workflow_dispatch` structurally can never reach trigger-phrase detection, review mode, label/assignee auto-run, resume/continue, or the thread-context fetch (`src/github/thread.ts`) — all of which only run on a real `ctx.entityNumber` from a real issue/PR event. GitHub also won't let a runner fake `GITHUB_EVENT_*`, so the only way to exercise these is with **real GitHub events**: `e2e-live-orchestrator.yml` (`workflow_dispatch` only, no schedule) creates real synthetic issues/PRs/comments in this repo via `scripts/e2e/live/scenario-*.ts`, and `e2e-live-events.yml` — a real reactive consumer workflow, isolated behind the dedicated `@e2e-agent` trigger phrase and `e2e-agent-autorun`/`e2e-resume-cap` labels so it can never collide with genuine repo conversation — reacts to them with `uses: ./`. Four scenarios:
 
-| Scenario | Verifies |
-|---|---|
+| Scenario         | Verifies                                                                                                                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `thread-context` | Regression test for the thread-context fix: a vague issue, the real detail in a follow-up comment, then a bare mention — asserts the resulting PR actually contains what only the follow-up comment asked for. |
-| `review` | Review mode end to end (no live coverage otherwise): a PR with a deliberate bug, `@e2e-agent review`, asserts a PR review gets posted. |
-| `auto-run` | The `auto_run_label` bypass: an issue with **no** trigger phrase anywhere, labeled `e2e-agent-autorun`, asserts the agent still ran. |
-| `resume` | `isResumeRequest`: a capped `max_total_tokens` run stops mid-plan, then `@e2e-agent continue` asserts the new run's plan carries over the prior open todos. |
+| `review`         | Review mode end to end (no live coverage otherwise): a PR with a deliberate bug, `@e2e-agent review`, asserts a PR review gets posted.                                                                         |
+| `auto-run`       | The `auto_run_label` bypass: an issue with **no** trigger phrase anywhere, labeled `e2e-agent-autorun`, asserts the agent still ran.                                                                           |
+| `resume`         | `isResumeRequest`: a capped `max_total_tokens` run stops mid-plan, then `@e2e-agent continue` asserts the new run's plan carries over the prior open todos.                                                    |
 
 Two things to know before running it:
+
 - **Identity.** `src/github/validation/actor.ts::checkActorIsHuman` rejects bot-authored actors — a real anti-loop protection, not weakened for this harness. The orchestrator's synthetic issues/comments must therefore be created with a real maintainer's PAT, not the default `GITHUB_TOKEN`. Add it as the **`E2E_PAT`** repository secret. `e2e-live-events.yml` runs the model via OpenRouter (`openrouter:deepseek/deepseek-v4-flash`), keyed off its own **`OPENROUTER_API_KEY`** secret rather than the `PROVIDER_API_KEY` secret `e2e.yml`/`demo.yml` use for OpenAI — the two never collide. Without either secret, every job below skips cleanly.
-- **Branch reality.** `issue_comment`/`issues`/`pull_request_review_comment` workflows always run from the workflow file on the **default branch**, never from a PR's branch. This harness validates `main` *after* merge — it's a post-merge confidence check, not a PR gate like `e2e.yml`.
+- **Branch reality.** `issue_comment`/`issues`/`pull_request_review_comment` workflows always run from the workflow file on the **default branch**, never from a PR's branch. This harness validates `main` _after_ merge — it's a post-merge confidence check, not a PR gate like `e2e.yml`.
 
 How to run: **Actions → E2E Live Events Orchestrator → Run workflow**.
 

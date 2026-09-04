@@ -1,0 +1,22 @@
+{
+  "name": "create-deep-agent-action",
+  "version": "0.1.2",
+  "description": "Create a secure starter workflow for Deep Agent Action.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dipjyotimetia/deep-agent-action",
+    "directory": "packages/create-deep-agent-action"
+  },
+  "type": "module",
+  "bin": {
+    "create-deep-agent-action": "bin/create-deep-agent-action.mjs"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

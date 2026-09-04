@@ -75,17 +75,14 @@ describe("renderTrackingBody", () => {
     expect(renderTrackingBody({ status: "success" })).not.toContain("⚠️");
   });
 
-  test("renders a paused tool approval and the rerun instruction", () => {
+  test("explains a stalled stop without exposing tool arguments", () => {
     const body = renderTrackingBody({
-      status: "interrupted",
-      stopReason: "interrupt",
-      interrupts: [{ name: "publish_release", args: { tag: "v1.2.3" } }],
-      branch: "deep-agent/issue-3",
+      status: "success",
+      stopReason: "stalled",
+      stopDetail: "Repeated tool call without todo progress: read_file (8 times).",
     });
-    expect(body).toContain("Paused");
-    expect(body).toContain("publish_release");
-    expect(body).toContain("@agent resume");
-    expect(body).not.toContain("v1.2.3");
+    expect(body).toContain("no-progress loop");
+    expect(body).toContain("read_file (8 times)");
   });
 
   test("embeds the hidden memory block when memory is present", () => {
@@ -103,14 +100,7 @@ describe("renderTrackingBody", () => {
 
 describe("parseTrackingStatus", () => {
   test("round-trips every RunStatus (+ working) through the hidden marker", () => {
-    for (const status of [
-      "working",
-      "success",
-      "skipped",
-      "refused",
-      "failed",
-      "interrupted",
-    ] as const) {
+    for (const status of ["working", "success", "skipped", "refused", "failed"] as const) {
       expect(parseTrackingStatus(renderTrackingBody({ status }))).toBe(status);
     }
   });

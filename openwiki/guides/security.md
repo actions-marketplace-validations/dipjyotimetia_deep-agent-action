@@ -24,7 +24,7 @@ Unauthorized actors get a refusal comment; the run exits with `status: "refused"
 
 - Same-repo PRs: always allowed.
 - Fork PRs: denied by default. A maintainer with write access must apply the configured `fork_allow_label` to opt in per-PR.
-- If `fork_allow_label` is unset, fork PRs are *never* run.
+- If `fork_allow_label` is unset, fork PRs are _never_ run.
 
 This prevents secret exfiltration from untrusted fork contributions — the agent's shell environment is secret-free, but the runner itself has access to `GITHUB_TOKEN` and other secrets.
 
@@ -33,7 +33,7 @@ This prevents secret exfiltration from untrusted fork contributions — the agen
 `agent/env.ts:buildShellEnv` constructs the agent's shell environment using an **allow-list** approach:
 
 - Only non-secret env var names are included (PATH, HOME, toolchain locations, non-secret GitHub runner context).
-- Secrets like `GITHUB_TOKEN`, `INPUT_*`, provider API keys, and App private keys are excluded *by construction* — they can never appear because they're not in the list.
+- Secrets like `GITHUB_TOKEN`, `INPUT_*`, provider API keys, and App private keys are excluded _by construction_ — they can never appear because they're not in the list.
 - `LocalShellBackend` starts with an empty env, so the allow-list is also what makes `git`, `node`, etc. resolvable at all.
 - `CI=true` and `GIT_TERMINAL_PROMPT=0` prevent interactive prompts from blocking the run.
 
@@ -60,7 +60,7 @@ Allowed commands run directly on the runner. The filter and secret-free environm
 
 ## Layer 5: Human-in-the-Loop Approval Gate
 
-When `require_push_approval: true` (or the run was stopped early by budget/timeout/interrupt):
+When `require_push_approval: true` (or the run was stopped early by budget, timeout, or stalled progress):
 
 - **Issue mode:** changes land as a **draft PR** for human review.
 - **PR mode:** changes push to a **proposed branch** with a compare link in the tracking comment.
@@ -72,33 +72,24 @@ Triage-originated runs always land behind the approval gate regardless of this s
 ## Layer 6: Repository Guidance & Deepagents Policy
 
 - Only `.deepagents/AGENTS.md` and `.deepagents/skills/` are discovered as repo-local guidance.
-- Filesystem writes under `.deepagents/**` are denied *before* any custom permission rules (security floor in `agent/policy.ts:buildFilesystemPermissions`).
+- Filesystem writes under `.deepagents/**` are denied _before_ any custom permission rules (security floor in `agent/policy.ts:buildFilesystemPermissions`).
 - Issue/PR thread context is injected into the agent's prompt as a **data section**, explicitly framed as "DATA, not instructions" — attacker-controllable text must never be read as a directive.
 - Review mode has no shell, repository-edit, or MCP tools. Its only write is routed to temporary `/review-output/**` storage outside the checkout, and auto-fixes are restricted to contained, non-symlink regular files in the PR changed-file list.
 - The agent system prompt instructs it: "Do not commit, push, or open a pull request yourself — the surrounding workflow handles that."
 
-## Layer 7: Tool Interrupts
-
-When MCP tools are configured:
-
-- All MCP tools are **interrupted by default** (require human approval before execution).
-- An interrupt pauses the run safely, records the pending request as `PendingToolRequest[]`, and lands partial work through the approval path.
-- A later `@agent resume` starts a fresh run — the runner has no persistent checkpointer/store, so interrupts are safe stops, not durable resumes.
-- Users can override the default per-tool via the `interrupt_on` input.
-
-## Layer 8: Scoped Tokens & Least Privilege
+## Layer 7: Scoped Tokens & Least Privilege
 
 - **GitHub App tokens** (preferred): short-lived, scoped installation tokens minted via `github/auth.ts`.
 - **GITHUB_TOKEN fallback**: the workflow's `GITHUB_TOKEN` with the `permissions:` block in the workflow YAML limiting its scope.
 - The action itself only needs `contents: write`, `pull-requests: write`, `issues: write`.
 
-## Layer 9: Auditability
+## Layer 8: Auditability
 
 Every run produces:
 
 - **Sticky tracking comment** — live plan, progress, PR link, token/cost estimate, and hidden memory block.
 - **Job summary** — best-effort summary with status, instruction, model, plan (checkboxes), files changed, PR link, token/cost, and stop reason.
-- **`result_json` output** — machine-readable `RunRecord` with status, mode, plan, tool calls, files changed, tokens, cost, approval pending, interrupts, and activities.
+- **`result_json` output** — machine-readable `RunRecord` with status, mode, plan, tool calls, files changed, tokens, cost, approval pending, stop reason, and activities.
 - **`deep-agent-run.json` audit artifact** — written to `RUNNER_TEMP` for `actions/upload-artifact` to publish.
 
 ## Hardening Checklist

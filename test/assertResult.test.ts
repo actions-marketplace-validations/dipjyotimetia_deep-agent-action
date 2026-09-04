@@ -49,15 +49,20 @@ describe("validateResult", () => {
     expect(validateResult(minimal).ok).toBe(true);
   });
 
-  test("accepts an interrupted result with pending tool metadata", () => {
+  test("accepts a stalled result with a safe stop detail", () => {
     expect(
       validateResult({
         ...valid,
-        status: "interrupted",
-        stopReason: "interrupt",
-        pendingInterrupts: [{ name: "publish_release", args: { tag: "v1.2.3" } }],
+        stopReason: "stalled",
+        stopDetail: "Repeated tool call without todo progress: read_file (8 times).",
       }).ok,
     ).toBe(true);
+  });
+
+  test("rejects an unknown stop reason", () => {
+    expect(validateResult({ ...valid, stopReason: "looped" }).errors.join()).toContain(
+      "stopReason",
+    );
   });
 });
 

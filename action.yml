@@ -17,10 +17,10 @@ inputs:
     description: >-
       Model id, optionally provider-prefixed. Providers: anthropic, openai, azure, google (Gemini),
       openrouter, openai-compatible (+ base_url), bedrock (AWS), vertexai (GCP). Examples:
-      'claude-sonnet-4-6', 'openai:gpt-5', 'google:gemini-2.5-pro', 'openrouter:openai/gpt-4o',
+      'claude-sonnet-5', 'openai:gpt-5', 'google:gemini-2.5-pro', 'openrouter:openai/gpt-4o',
       'bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0', 'openai-compatible:llama-3.1-70b'.
     required: false
-    default: "claude-sonnet-4-6"
+    default: "claude-sonnet-5"
   base_url:
     description: "Endpoint URL for the 'openai-compatible' provider (Groq, xAI, DeepSeek, Together, Ollama, vLLM, …)."
     required: false
@@ -35,12 +35,13 @@ inputs:
   filesystem_permissions:
     description: >-
       Optional deepagents filesystem permission rules JSON. Each rule has operations (read/write), absolute
-      glob paths, and optional mode (allow/deny). Repository .deepagents memory/skills remain write-protected.
+      glob paths, and optional mode (allow/deny). Built-in filesystem writes under .deepagents stay denied.
     required: false
-  interrupt_on:
+  subagents:
     description: >-
-      Optional deepagents HITL interrupt policy JSON mapping tool names to true/false or an allowedDecisions
-      object. MCP tools require approval by default; an explicit false disables that default.
+      Optional specialist-subagent JSON. Each item requires name, description, and systemPrompt; it may select
+      explicit MCP tools, repository .deepagents skills, restrictive filesystem deny rules, a model, and
+      responseMode: findings. The built-in general-purpose subagent cannot be replaced.
     required: false
   allowed_permissions:
     description: "Comma-separated repository permission levels allowed to trigger the agent."
@@ -91,7 +92,12 @@ inputs:
   require_push_approval:
     description: "Gate landing of changes behind human review: opens a draft PR (issue mode) or pushes a proposed branch with a compare link (PR mode)."
     required: false
-    default: "false"
+    default: "true"
+  protected_paths:
+    description: >-
+      Comma/newline-separated repository-relative globs for additional files the agent may never publish.
+      Repository .deepagents guidance and deep-agent config paths are always protected.
+    required: false
   verified_commits:
     description: >-
       Land commits via the GitHub App's createCommitOnBranch GraphQL mutation so they show as
@@ -100,27 +106,66 @@ inputs:
       not preserved (files always land as mode 100644).
     required: false
     default: "false"
-  apply_suggestions:
-    description: >-
-      Make every review run also apply its own single-line suggestions directly and land them as
-      a commit, instead of only leaving comments. A mention of "review and fix" always does this
-      regardless of this input.
-    required: false
-    default: "false"
   enable_triage:
     description: >-
-      Classify a new issue with no trigger phrase via a cheap one-shot model call, deciding
-      whether to open a PR, request a review, ask for clarification, add labels, or do nothing.
-      Default off. Only ever acts when the issue's author passes the same human/permission checks
-      as a manual mention, and any resulting PR is forced through the approval gate.
+      Enable the label-backed issue-triage lifecycle. External contributors receive only safe
+      classification/labels/comments; an agentic fix needs a permitted author or triage_run_label.
+      Default off. Any resulting code change is always forced through the approval gate.
     required: false
     default: "false"
   triage_allowed_labels:
-    description: "Comma/newline-separated labels the triage classifier may apply. Anything outside this list is ignored."
+    description: "Deprecated; retained for compatibility and ignored by the lifecycle. Configure named triage_label_* inputs instead."
     required: false
   triage_model:
-    description: "Model used for the triage classification call. Defaults to the 'model' input."
+    description: "Model used for triage classification and final outcome assessment. Defaults to the 'model' input."
     required: false
+  triage_label_needs_triage:
+    description: "Lifecycle label for an issue currently being assessed."
+    required: false
+    default: "triage: needs triage"
+  triage_label_needs_reproduction:
+    description: "Lifecycle label for an issue missing a reproducible report."
+    required: false
+    default: "triage: needs reproduction"
+  triage_label_unable_to_reproduce:
+    description: "Lifecycle label for an issue the agent could not reproduce."
+    required: false
+    default: "triage: unable to reproduce"
+  triage_label_unable_to_fix:
+    description: "Lifecycle label for a reproduced issue with no safe fix."
+    required: false
+    default: "triage: unable to fix"
+  triage_label_needs_maintainer:
+    description: "Lifecycle label for an actionable external issue awaiting maintainer approval."
+    required: false
+    default: "triage: needs maintainer"
+  triage_label_fix_proposed:
+    description: "Lifecycle label for an issue with a draft fix proposal."
+    required: false
+    default: "triage: fix proposed"
+  triage_label_not_actionable:
+    description: "Lifecycle label for non-actionable issues."
+    required: false
+    default: "triage: not actionable"
+  triage_label_skipped:
+    description: "Lifecycle label for issues unsuitable for runner triage."
+    required: false
+    default: "triage: skipped"
+  triage_label_failed:
+    description: "Lifecycle label for unexpected triage failures."
+    required: false
+    default: "triage: failed"
+  triage_run_label:
+    description: "Label a permitted maintainer applies to start an agentic triage run."
+    required: false
+    default: "triage: run"
+  triage_bot_logins:
+    description: "Comma/newline-separated additional bot logins whose comments never trigger re-triage."
+    required: false
+  triage_max_failed_attempts:
+    description: "Maximum automatic triage failures before manual intervention is required."
+    required: false
+    default: "3"
   max_cost_usd:
     description: "Abort the run once estimated spend reaches this many USD (requires a known model price; pair with max_total_tokens for unpriced models). Partial work lands as a draft for review. Unset = no cap."
     required: false
@@ -131,24 +176,17 @@ inputs:
     description: "Abort the agent once it has run this many minutes; partial work lands as a draft for review (like a budget stop). Unset = no cap. (A job-level timeout-minutes still applies but kills the run without landing anything.)"
     required: false
   recursion_limit:
-    description: "Max LangGraph super-steps per run. Raise for very long multi-step tasks that abort with a recursion-limit error."
+    description: "Max agent super-steps per run. Raise for very long multi-step tasks that reach the recursion ceiling."
     required: false
     default: "150"
-  # --- Reserved for future phases (declared so the input surface is intentional) ---
-  execution_mode:
-    description: "Reserved. Only 'in_runner' is implemented in v1; 'bridge' (hosted Open SWE) is planned (P1)."
+  max_repeated_tool_calls:
+    description: "Stop when the same tool call repeats without todo progress. Default 8; raise only for intentional repeated operations."
     required: false
-    default: "in_runner"
-  langgraph_url:
-    description: "Reserved for bridge mode (P1)."
-    required: false
-  assistant_id:
-    description: "Reserved for bridge mode (P1)."
-    required: false
+    default: "8"
 
 outputs:
   status:
-    description: "Run outcome: success | skipped | refused | failed | interrupted."
+    description: "Run outcome: success | skipped | refused | failed."
     value: ${{ steps.agent.outputs.status }}
   pr_url:
     description: "URL of the opened pull request, if any."
@@ -162,9 +200,9 @@ outputs:
   timed_out:
     description: "'true' when the run was stopped early by max_runtime_minutes (partial work opened for review)."
     value: ${{ steps.agent.outputs.timed_out }}
-  interrupted:
-    description: "'true' when deepagents paused before a configured tool requiring approval."
-    value: ${{ steps.agent.outputs.interrupted }}
+  stalled:
+    description: "'true' when the agent stopped after repeated no-progress tool calls or reaching its recursion ceiling; partial work is review-gated."
+    value: ${{ steps.agent.outputs.stalled }}
   audit_artifact:
     description: "Invocation-unique name of the uploaded audit-record artifact."
     value: ${{ steps.audit.outputs.artifact_name }}
@@ -178,7 +216,7 @@ runs:
     - name: Set up Bun
       uses: oven-sh/setup-bun@v2
       with:
-        bun-version: "1.3.14"
+        bun-version: "1.4.0"
         token: ${{ inputs.github_token || github.token }}
 
     - name: Initialize audit record
@@ -209,7 +247,7 @@ runs:
         INPUT_MCP_CONFIG: ${{ inputs.mcp_config }}
         INPUT_HARNESS_PROFILE: ${{ inputs.harness_profile }}
         INPUT_FILESYSTEM_PERMISSIONS: ${{ inputs.filesystem_permissions }}
-        INPUT_INTERRUPT_ON: ${{ inputs.interrupt_on }}
+        INPUT_SUBAGENTS: ${{ inputs.subagents }}
         INPUT_ALLOWED_PERMISSIONS: ${{ inputs.allowed_permissions }}
         INPUT_ALLOWED_COMMANDS: ${{ inputs.allowed_commands }}
         INPUT_DENIED_COMMANDS: ${{ inputs.denied_commands }}
@@ -224,18 +262,28 @@ runs:
         INPUT_APP_PRIVATE_KEY: ${{ inputs.app_private_key }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github_token }}
         INPUT_REQUIRE_PUSH_APPROVAL: ${{ inputs.require_push_approval }}
+        INPUT_PROTECTED_PATHS: ${{ inputs.protected_paths }}
         INPUT_VERIFIED_COMMITS: ${{ inputs.verified_commits }}
-        INPUT_APPLY_SUGGESTIONS: ${{ inputs.apply_suggestions }}
         INPUT_ENABLE_TRIAGE: ${{ inputs.enable_triage }}
         INPUT_TRIAGE_ALLOWED_LABELS: ${{ inputs.triage_allowed_labels }}
         INPUT_TRIAGE_MODEL: ${{ inputs.triage_model }}
+        INPUT_TRIAGE_LABEL_NEEDS_TRIAGE: ${{ inputs.triage_label_needs_triage }}
+        INPUT_TRIAGE_LABEL_NEEDS_REPRODUCTION: ${{ inputs.triage_label_needs_reproduction }}
+        INPUT_TRIAGE_LABEL_UNABLE_TO_REPRODUCE: ${{ inputs.triage_label_unable_to_reproduce }}
+        INPUT_TRIAGE_LABEL_UNABLE_TO_FIX: ${{ inputs.triage_label_unable_to_fix }}
+        INPUT_TRIAGE_LABEL_NEEDS_MAINTAINER: ${{ inputs.triage_label_needs_maintainer }}
+        INPUT_TRIAGE_LABEL_FIX_PROPOSED: ${{ inputs.triage_label_fix_proposed }}
+        INPUT_TRIAGE_LABEL_NOT_ACTIONABLE: ${{ inputs.triage_label_not_actionable }}
+        INPUT_TRIAGE_LABEL_SKIPPED: ${{ inputs.triage_label_skipped }}
+        INPUT_TRIAGE_LABEL_FAILED: ${{ inputs.triage_label_failed }}
+        INPUT_TRIAGE_RUN_LABEL: ${{ inputs.triage_run_label }}
+        INPUT_TRIAGE_BOT_LOGINS: ${{ inputs.triage_bot_logins }}
+        INPUT_TRIAGE_MAX_FAILED_ATTEMPTS: ${{ inputs.triage_max_failed_attempts }}
         INPUT_MAX_COST_USD: ${{ inputs.max_cost_usd }}
         INPUT_MAX_TOTAL_TOKENS: ${{ inputs.max_total_tokens }}
         INPUT_MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes }}
         INPUT_RECURSION_LIMIT: ${{ inputs.recursion_limit }}
-        INPUT_EXECUTION_MODE: ${{ inputs.execution_mode }}
-        INPUT_LANGGRAPH_URL: ${{ inputs.langgraph_url }}
-        INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}
+        INPUT_MAX_REPEATED_TOOL_CALLS: ${{ inputs.max_repeated_tool_calls }}
 
     # Publish the audit record written by this invocation. The UUID suffix
     # prevents parallel or matrix jobs and repeated action steps from replacing
