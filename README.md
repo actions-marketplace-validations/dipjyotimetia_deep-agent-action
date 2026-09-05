@@ -24,6 +24,7 @@ Comment `@agent fix the failing test` on an issue and get a pull request back. C
 - [Inputs](#inputs)
 - [Outputs](#outputs)
 - [Per-repo configuration](#per-repo-configuration)
+- [Project Wiki](#project-wiki)
 - [Security](#security)
 - [Examples](#examples)
 - [Troubleshooting](#troubleshooting)
@@ -277,6 +278,14 @@ system_prompt: |
 ```
 
 All execution, landing, budget, filesystem, MCP, and subagent controls belong in the invoking workflow. Full field reference in [docs/configuration.md](docs/configuration.md).
+
+## Project Wiki
+
+The repository's detailed code documentation lives in [`openwiki/`](openwiki/) and is published to the [GitHub Wiki](https://github.com/dipjyotimetia/deep-agent-action/wiki) after review.
+
+A weekly workflow runs OpenWiki through OpenRouter and maintains one `openwiki/update` pull request. Merging reviewed documentation into `main` invokes the immutable [`openwiki-github-wiki-action`](https://github.com/dipjyotimetia/openwiki-github-wiki-action) release, which treats `openwiki/` as canonical and replaces the generated Wiki pages. The publisher never runs a model or publishes an unreviewed update.
+
+Both workflows mint short-lived credentials from the dedicated OpenWiki Publisher GitHub App. Configure `OPENWIKI_APP_CLIENT_ID` as a repository variable and `OPENWIKI_APP_PRIVATE_KEY` as a repository secret; the App needs **Contents: Read and write** and **Pull requests: Read and write** for this combined workflow. Create the Wiki's first `Home` page in GitHub once before the first publication.
 
 ## Security
 
