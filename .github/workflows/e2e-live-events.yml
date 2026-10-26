@@ -47,7 +47,7 @@ jobs:
     if: github.actor == 'dipjyotimetia'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 

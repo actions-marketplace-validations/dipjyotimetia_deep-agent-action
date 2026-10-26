@@ -48,7 +48,7 @@ jobs:
             echo "::warning::OPENROUTER_API_KEY and/or E2E_PAT not set; skipping the live event scenarios."
           fi
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Ensure synthetic labels exist
         env:
@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
